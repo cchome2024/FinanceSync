@@ -36,14 +36,14 @@
 
 **Purpose**: 完成所有用户故事共享的底层能力，包含数据库结构、异步处理和通用服务。
 
-- [ ] T005 创建财务核心实体与审计日志的 Alembic 迁移 `backend/migrations/versions/`  
-- [ ] T006 实现导入任务与财务记录的 SQLAlchemy 模型 `backend/app/models/financial.py`
-- [ ] T007 构建统一的 LLM 客户端与解析器接口 `backend/app/services/llm_client.py`
-- [ ] T008 初始化 Celery 配置与任务入口 `backend/app/workers/__init__.py`
-- [ ] T009 实现文件存储适配器（本地/S3） `backend/app/services/storage_adapter.py`
-- [ ] T010 建立目录监控调度器骨架 `backend/app/workers/directory_watcher.py`
-- [ ] T011 配置前端全局状态容器（Context + Zustand） `frontend/src/state/financeStore.ts`
-- [ ] T012 搭建前端 API 客户端基础封装 `frontend/src/services/apiClient.ts`
+- [x] T005 创建财务核心实体与审计日志的 Alembic 迁移 `backend/migrations/versions/`  
+- [x] T006 实现导入任务与财务记录的 SQLAlchemy 模型 `backend/app/models/financial.py`
+- [x] T007 构建统一的 LLM 客户端与解析器接口 `backend/app/services/llm_client.py`
+- [x] T008 初始化 Celery 配置与任务入口 `backend/app/workers/__init__.py`
+- [x] T009 实现文件存储适配器（本地/S3） `backend/app/services/storage_adapter.py`
+- [x] T010 建立目录监控调度器骨架 `backend/app/workers/directory_watcher.py`
+- [x] T011 配置前端全局状态容器（Context + Zustand） `frontend/src/state/financeStore.ts`
+- [x] T012 搭建前端 API 客户端基础封装 `frontend/src/services/apiClient.ts`
 
 ---
 
