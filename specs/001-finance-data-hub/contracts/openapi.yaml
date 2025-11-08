@@ -1,0 +1,364 @@
+openapi: 3.1.0
+info:
+  title: FinanceSync API Contracts
+  version: 0.1.0
+servers:
+  - url: https://api.internal.financesync.local
+paths:
+  /api/v1/parse/upload:
+    post:
+      summary: Parse unstructured financial data via AI
+      description: >
+        Accepts natural language prompts, pasted tables, or uploaded files from the AI
+        聊天窗口。创建导入任务并返回结构化候选记录供确认。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                prompt:
+                  type: string
+                  description: 自然语言描述或表格文本
+                file:
+                  type: string
+                  format: binary
+                  description: 可选附件（CSV、XLSX、PDF、图像）
+                companyId:
+                  type: string
+                  format: uuid
+                  description: 关联公司主体
+              required:
+                - prompt
+      responses:
+        "202":
+          description: 导入任务已创建，等待财务确认
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseJobResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+  /api/v1/import-jobs/{jobId}:
+    get:
+      summary: 获取导入任务详情
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      responses:
+        "200":
+          description: 导入任务与候选记录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportJob"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/v1/import-jobs/{jobId}/confirm:
+    post:
+      summary: 确认或调整 AI 解析结果
+      parameters:
+        - $ref: "#/components/parameters/JobId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmationPayload"
+      responses:
+        "200":
+          description: 已保存并写入正式财务记录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConfirmationResult"
+        "409":
+          description: 任务状态冲突
+        "422":
+          $ref: "#/components/responses/ValidationError"
+  /api/v1/financial/overview:
+    get:
+      summary: 获取财务看板数据
+      parameters:
+        - $ref: "#/components/parameters/CompanyId"
+        - name: snapshotDate
+          in: query
+          description: 目标时间点，默认最新
+          schema:
+            type: string
+            format: date
+        - name: includeForecast
+          in: query
+          schema:
+            type: boolean
+            default: true
+      responses:
+        "200":
+          description: 看板数据汇总
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinancialOverview"
+  /api/v1/query:
+    post:
+      summary: 执行自然语言查询
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                question:
+                  type: string
+                companyId:
+                  type: string
+                  format: uuid
+                filters:
+                  type: object
+                  additionalProperties: true
+              required:
+                - question
+      responses:
+        "200":
+          description: 查询结果与推荐图表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NlqResult"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+components:
+  parameters:
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CompanyId:
+      name: companyId
+      in: query
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: 无效请求
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ValidationError:
+      description: 校验失败
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ValidationError"
+    NotFound:
+      description: 未找到资源
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    ParseJobResponse:
+      type: object
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending_review, failed]
+        preview:
+          type: array
+          items:
+            $ref: "#/components/schemas/ParsedRecord"
+    ParsedRecord:
+      type: object
+      properties:
+        recordType:
+          type: string
+          enum: [account_balance, revenue, expense, income_forecast]
+        payload:
+          type: object
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        warnings:
+          type: array
+          items:
+            type: string
+    ImportJob:
+      type: object
+      properties:
+        jobId:
+          type: string
+        status:
+          type: string
+          enum: [pending_review, approved, rejected, failed]
+        sourceType:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attachment"
+        candidateRecords:
+          type: array
+          items:
+            $ref: "#/components/schemas/ParsedRecord"
+    Attachment:
+      type: object
+      properties:
+        id:
+          type: string
+        fileType:
+          type: string
+        previewUrl:
+          type: string
+    ConfirmationPayload:
+      type: object
+      properties:
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConfirmationAction"
+      required:
+        - actions
+    ConfirmationAction:
+      type: object
+      properties:
+        recordId:
+          type: string
+          nullable: true
+        recordType:
+          type: string
+          enum: [account_balance, revenue, expense, income_forecast]
+        operation:
+          type: string
+          enum: [approve, edit, reject]
+        payload:
+          type: object
+        comment:
+          type: string
+    ConfirmationResult:
+      type: object
+      properties:
+        approvedCount:
+          type: integer
+        rejectedCount:
+          type: integer
+        updatedRecords:
+          type: array
+          items:
+            $ref: "#/components/schemas/ParsedRecord"
+    FinancialOverview:
+      type: object
+      properties:
+        snapshotDate:
+          type: string
+          format: date
+        balances:
+          type: array
+          items:
+            $ref: "#/components/schemas/BalanceSummary"
+        revenues:
+          type: array
+          items:
+            $ref: "#/components/schemas/CategorySummary"
+        expenses:
+          type: array
+          items:
+            $ref: "#/components/schemas/CategorySummary"
+        forecasts:
+          type: array
+          items:
+            $ref: "#/components/schemas/ForecastSummary"
+    BalanceSummary:
+      type: object
+      properties:
+        companyId:
+          type: string
+        cashBalance:
+          type: number
+        investmentBalance:
+          type: number
+        totalBalance:
+          type: number
+    CategorySummary:
+      type: object
+      properties:
+        month:
+          type: string
+          format: date
+        category:
+          type: string
+        subcategory:
+          type: string
+        amount:
+          type: number
+    ForecastSummary:
+      type: object
+      properties:
+        productName:
+          type: string
+        certainty:
+          type: string
+          enum: [certain, uncertain]
+        expectedAmount:
+          type: number
+        expectedDate:
+          type: string
+          format: date
+    NlqResult:
+      type: object
+      properties:
+        question:
+          type: string
+        sql:
+          type: string
+        result:
+          type: array
+          items:
+            type: object
+        chart:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [line, bar, area, pie, table]
+            config:
+              type: object
+        explanations:
+          type: array
+          items:
+            type: string
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+    ValidationError:
+      type: object
+      properties:
+        error:
+          type: string
+          example: validation_error
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+

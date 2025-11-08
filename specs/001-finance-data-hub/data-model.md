@@ -1,0 +1,67 @@
+# 数据模型设计：财务数据统一平台
+
+## 实体概览
+
+| 实体 | 描述 | 关键关系 |
+|------|------|----------|
+| AccountBalance | 各公司账户在特定时间点的余额与理财金额快照 | 属于 Company；由 ImportJob 生成 |
+| RevenueRecord | 收入明细，按大类/子类/月份记录 | 属于 Company；关联 ImportJob |
+| ExpenseRecord | 支出明细，按大类/月份记录 | 属于 Company；关联 ImportJob |
+| IncomeForecast | 收入预测，包含确定性/非确定性、资管产品维度 | 属于 Company；可引用 RevenueRecord 以便对比 |
+| ImportJob | 描述一次 AI 导入任务（上传或目录监控）及状态 | 关联多条 AccountBalance/RevenueRecord/ExpenseRecord/IncomeForecast |
+| ConfirmationLog | 记录用户或 AI 的确认操作、修改意见 | 关联 ImportJob 与具体财务记录 |
+| NlqQuery | 自然语言问题及执行结果快照 | 可引用生成的报表或图表配置 |
+| Company | 公司主体或账户归属信息 | 与所有财务数据实体关联 |
+| Attachment | 存储原始文件或截取的 OCR 文本 | 关联 ImportJob |
+
+## 实体详情
+
+### Company
+- **字段**: `id`, `name`, `display_name`, `currency`, `created_at`, `updated_at`
+- **约束**: `name` 唯一；默认币种为 CNY。
+- **关系**: `has_many` AccountBalance/RevenueRecord/ExpenseRecord/IncomeForecast。
+
+### ImportJob
+- **字段**: `id`, `source_type` (manual_upload / watched_dir / ai_chat), `status` (pending_review / approved / rejected / failed), `initiator_id`, `initiator_role`, `llm_model`, `confidence_score`, `started_at`, `completed_at`, `raw_payload_ref`, `error_log`
+- **行为**: 状态机允许 `pending_review → approved/rejected/failed`；失败可重试。
+- **关系**: `has_many` attachments, confirmation_logs, financial records。
+
+### Attachment
+- **字段**: `id`, `import_job_id`, `file_type`, `storage_path`, `text_snapshot`, `checksum`, `created_at`
+- **约束**: `checksum` 去重；`text_snapshot` 保存 OCR/解析后的文本。
+
+### AccountBalance
+- **字段**: `id`, `company_id`, `import_job_id`, `reported_at`, `cash_balance`, `investment_balance`, `total_balance`, `currency`, `notes`
+- **验证**: 金额字段需为非负数；`total_balance = cash_balance + investment_balance`。
+
+### RevenueRecord
+- **字段**: `id`, `company_id`, `import_job_id`, `month`, `category`, `subcategory`, `amount`, `currency`, `confidence`, `notes`
+- **验证**: `month` 采用 `YYYY-MM`；`category`/`subcategory` 来自字典；`confidence` 0-1。
+
+### ExpenseRecord
+- **字段**: `id`, `company_id`, `import_job_id`, `month`, `category`, `amount`, `currency`, `confidence`, `notes`
+- **验证**: 同收入；金额允许为零但不能为负。
+
+### IncomeForecast
+- **字段**: `id`, `company_id`, `import_job_id`, `cash_in_date`, `product_line`, `product_name`, `certainty` (certain/uncertain), `category`, `expected_amount`, `currency`, `confidence`, `notes`
+- **验证**: `expected_amount` > 0；`certainty` 枚举；`cash_in_date` >= today。
+
+### ConfirmationLog
+- **字段**: `id`, `import_job_id`, `record_type`, `record_id`, `actor_id`, `actor_role`, `action` (confirmed/edited/rejected), `diff_snapshot`, `comment`, `created_at`
+- **用途**: 满足 FR-005 的追溯要求。
+
+### NlqQuery
+- **字段**: `id`, `actor_id`, `question`, `generated_sql`, `execution_result_ref`, `chart_spec`, `responded_at`, `latency_ms`
+- **验证**: SQL 保存为只读；记录 chart 类型（line/bar/pie/table）。
+
+## 字典与配置
+- **Category Dictionary**: 收入/支出/预测类别均由配置表维护，支持层级结构。
+- **LLM Model Registry**: 记录可用模型、速率限制、费用估算。
+
+## 数据流
+1. 用户在 AI 聊天窗口提交资料 → 创建 `ImportJob (pending_review)` + `Attachment`。
+2. 后端 worker 解析 → 生成候选财务记录（仍标记为 `pending_review`）+ 初始 `confidence_score`。
+3. 财务人员确认 → 写入正式表并记录 `ConfirmationLog`，`ImportJob` 状态更新为 `approved`。
+4. 仪表板查询默认只读取 `approved` 记录。
+5. 自然语言查询将结果存入 `NlqQuery`，供历史追踪与调试。
+
