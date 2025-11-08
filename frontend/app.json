@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "FinanceSync",
+    "slug": "financesync",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "jsEngine": "jsc",
+    "web": {
+      "bundler": "metro"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
+
