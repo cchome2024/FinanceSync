@@ -219,11 +219,48 @@ class ImportJobRepository:
                 fallback_keys=["category", "subcategory"],
             )
             company_id = self._resolve_company_id(payload)
+            month = _as_date(payload["month"])
+
+            stmt = select(RevenueRecord).where(
+                RevenueRecord.company_id == company_id,
+                RevenueRecord.month == month,
+            )
+            if category_id:
+                stmt = stmt.where(RevenueRecord.category_id == category_id)
+            else:
+                stmt = stmt.where(RevenueRecord.category == payload.get("category", ""))
+                if payload.get("subcategory") is None:
+                    stmt = stmt.where(RevenueRecord.subcategory.is_(None))
+                else:
+                    stmt = stmt.where(RevenueRecord.subcategory == payload.get("subcategory"))
+
+            existing_revenue = self.session.execute(stmt).scalar_one_or_none()
+            conflict_info = {
+                "companyId": company_id,
+                "month": month.isoformat(),
+                "category": payload.get("category"),
+                "subcategory": payload.get("subcategory"),
+            }
+
+            if existing_revenue:
+                if not overwrite:
+                    raise DuplicateRecordError(record_type, conflict_info)
+                existing_revenue.import_job_id = job.id
+                existing_revenue.category_id = category_id or existing_revenue.category_id
+                existing_revenue.category = payload.get("category", existing_revenue.category)
+                existing_revenue.subcategory = payload.get("subcategory", existing_revenue.subcategory)
+                existing_revenue.amount = payload.get("amount", existing_revenue.amount)
+                existing_revenue.currency = payload.get("currency", existing_revenue.currency)
+                existing_revenue.confidence = payload.get("confidence", existing_revenue.confidence)
+                existing_revenue.notes = payload.get("notes", existing_revenue.notes)
+                self._session.flush()
+                return existing_revenue.id
+
             record = RevenueRecord(
                 company_id=company_id,
                 import_job_id=job.id,
                 category_id=category_id,
-                month=_as_date(payload["month"]),
+                month=month,
                 category=payload.get("category", ""),
                 subcategory=payload.get("subcategory"),
                 amount=payload.get("amount", 0),

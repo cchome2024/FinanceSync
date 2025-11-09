@@ -3,10 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
 from app.api.deps import get_ai_parser, get_import_job_repository, get_storage_adapter
-from app.models.financial import ImportSource
+from app.models.financial import ImportSource, ImportStatus
 from app.repositories.import_jobs import ImportJobRepository
 from app.schemas.imports import ImportJobDetail, ParseJobResponse
 from app.services.ai_parser import AIParserService
+from app.services.llm_client import LLMClientError, LLMClientParseError
 from app.services.storage_adapter import StorageAdapter
 
 router = APIRouter(prefix="/api/v1", tags=["imports"])
@@ -44,7 +45,21 @@ async def parse_upload(
         )
         print(f"[IMPORT] stored attachment path={stored_path}")
 
-    preview, raw = await parser.parse_prompt(prompt, attachments_bytes)
+    try:
+        preview, raw = await parser.parse_prompt(prompt, attachments_bytes)
+    except LLMClientParseError as exc:
+        job.status = ImportStatus.FAILED
+        repo.session.add(job)
+        repo.session.commit()
+        return ParseJobResponse(
+            jobId=job.id,
+            status=job.status.value,
+            preview=[],
+            rawResponse={"rawText": exc.raw_text, "error": str(exc)},
+        )
+    except LLMClientError as exc:
+        repo.session.rollback()
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     print(f"[IMPORT] parser returned {len(preview)} candidate(s)")
     if company_id:
         for record in preview:

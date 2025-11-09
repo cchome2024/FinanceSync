@@ -30,7 +30,7 @@ class ParseJobResponse(BaseModel):
     job_id: str = Field(alias="jobId")
     status: str
     preview: List[CandidateRecord] = Field(default_factory=list)
-    raw_response: Dict[str, Any] | None = Field(alias="rawResponse", default=None)
+    raw_response: Any | None = Field(alias="rawResponse", default=None)
 
 
 class AttachmentInfo(BaseModel):

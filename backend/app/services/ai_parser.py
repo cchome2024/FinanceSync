@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Tuple
 
 from app.schemas.imports import CandidateRecord, RecordType
-from app.services.llm_client import LLMClient, LLMClientError
+from app.services.llm_client import LLMClient, LLMClientError, LLMClientParseError
 
 
 class AIParserService:

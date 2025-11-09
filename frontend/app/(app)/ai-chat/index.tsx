@@ -1,4 +1,4 @@
-import { Link } from 'expo-router'
+import { useFocusEffect } from 'expo-router'
 import { useCallback, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
@@ -13,9 +13,11 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
+import * as DocumentPicker from 'expo-document-picker'
 import { ImportPreview } from '@/components/imports/ImportPreview'
-import { apiClient } from '@/src/services/apiClient'
+import { apiClient, HttpError } from '@/src/services/apiClient'
 import { useFinanceStore } from '@/src/state/financeStore'
+import { NavLink } from '@/components/common/NavLink'
 
 type CandidateRecord = {
   recordType: 'account_balance' | 'revenue' | 'expense' | 'income_forecast'
@@ -34,6 +36,34 @@ type ParseJobResponse = {
 type ConfirmJobResponse = {
   approvedCount: number
   rejectedCount: number
+}
+
+const formatRawResponse = (raw: unknown): string => {
+  if (!raw) {
+    return '暂无原始响应'
+  }
+
+  if (typeof raw === 'string') {
+    return raw
+  }
+
+  if (typeof raw === 'object' && raw !== null && 'rawText' in raw) {
+    const rawText = (raw as { rawText?: unknown }).rawText
+    if (typeof rawText === 'string') {
+      try {
+        const parsed = JSON.parse(rawText)
+        return JSON.stringify(parsed, null, 2)
+      } catch {
+        return rawText
+      }
+    }
+  }
+
+  try {
+    return JSON.stringify(raw, null, 2)
+  } catch {
+    return String(raw)
+  }
 }
 
 const generateId = () => Math.random().toString(36).slice(2)
@@ -59,6 +89,9 @@ export default function AIChatScreen() {
   const [messageInput, setMessageInput] = useState('')
   const [companyId, setCompanyId] = useState('')
   const [isConfirming, setIsConfirming] = useState(false)
+  const [selectedFile, setSelectedFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null)
+  const [isPickingFile, setIsPickingFile] = useState(false)
+  const [pendingOverwriteMessage, setPendingOverwriteMessage] = useState<string | null>(null)
 
   const {
     importChat,
@@ -93,6 +126,17 @@ export default function AIChatScreen() {
       if (companyId.trim()) {
         formData.append('company_id', companyId.trim())
       }
+      if (selectedFile) {
+        if (selectedFile.file) {
+          formData.append('file', selectedFile.file)
+        } else if (selectedFile.uri) {
+          formData.append('file', {
+            uri: selectedFile.uri,
+            name: selectedFile.name ?? 'upload',
+            type: selectedFile.mimeType ?? 'application/octet-stream',
+          } as unknown as Blob)
+        }
+      }
 
       const response = await apiClient.post<ParseJobResponse>('/api/v1/parse/upload', formData)
       console.log('[IMPORT CHAT] response', response)
@@ -105,11 +149,12 @@ export default function AIChatScreen() {
         warnings: record.warnings ?? [],
       }))
       setImportPreview(previewRecords)
+      setSelectedFile(null)
 
       addImportMessage({
         id: generateId(),
         role: 'assistant',
-        content: `原始响应：\n${JSON.stringify(response.rawResponse ?? response.preview, null, 2)}`,
+        content: `原始响应：\n${formatRawResponse(response.rawResponse ?? response.preview)}`,
         createdAt: new Date().toISOString(),
       })
 
@@ -123,13 +168,36 @@ export default function AIChatScreen() {
         return
       }
 
-      response.preview.forEach((record, index) => {
-        addImportMessage({
-          id: generateId(),
-          role: 'assistant',
-          content: formatRecord(record, index),
-          createdAt: new Date().toISOString(),
-        })
+      const typeNames: Record<CandidateRecord['recordType'], string> = {
+        account_balance: '账户余额',
+        revenue: '收入',
+        expense: '支出',
+        income_forecast: '收入预测',
+      }
+      const counts: Record<CandidateRecord['recordType'], number> = {
+        account_balance: 0,
+        revenue: 0,
+        expense: 0,
+        income_forecast: 0,
+      }
+      response.preview.forEach((record) => {
+        counts[record.recordType] += 1
+      })
+
+      const detailLines = (Object.keys(counts) as Array<CandidateRecord['recordType']>)
+        .filter((type) => counts[type] > 0)
+        .map((type) => `- ${typeNames[type]} ${counts[type]} 条`)
+      const summaryLines = [
+        `识别到 ${response.preview.length} 条记录：`,
+        ...detailLines,
+        '请在下方候选记录列表中确认内容。',
+      ]
+
+      addImportMessage({
+        id: generateId(),
+        role: 'assistant',
+        content: summaryLines.join('\n'),
+        createdAt: new Date().toISOString(),
       })
     } catch (error) {
       console.error(error)
@@ -169,34 +237,61 @@ export default function AIChatScreen() {
         setImportPreview([])
         setCurrentJobId(null)
       } catch (error) {
-        const httpError = error as Error & { status?: number; body?: string }
+        const httpError = error instanceof HttpError ? error : undefined
         if (httpError?.status === 409) {
-          let detail: { conflict?: Record<string, unknown>; message?: string } | undefined
+          let parsed: { detail?: { conflict?: Record<string, unknown>; recordType?: string; message?: string } } | undefined
           try {
-            detail = httpError.body ? JSON.parse(httpError.body) : undefined
+            parsed = httpError.body ? JSON.parse(httpError.body) : undefined
           } catch {
             // ignore
           }
+          const detail = parsed?.detail
           const conflict = detail?.conflict ?? {}
           const companyName = (conflict.companyId as string | undefined) || '该公司'
-          const reportedAt = conflict.reportedAt as string | undefined
-          const description = reportedAt ? `${companyName} ${reportedAt}` : companyName
-          const promptMessage = `${description} 已存在记录，是否覆盖？`
-
-          const triggerOverwrite = () => {
-            setTimeout(() => {
-              void executeConfirm(true)
-            }, 0)
+          const recordType = detail?.recordType ?? 'record'
+          const month = (conflict.month as string | undefined) || (conflict.reportedAt as string | undefined)
+          const category = (conflict.category as string | undefined) || (conflict.categoryPath as string | undefined)
+          const subcategory = conflict.subcategory as string | undefined
+          const parts: string[] = [companyName]
+          if (month) {
+            parts.push(month)
           }
+          if (recordType === 'revenue') {
+            if (category) {
+              parts.push(category)
+            }
+            if (subcategory) {
+              parts.push(subcategory)
+            }
+          }
+          const description = parts.join(' / ')
+          const bannerMessage =
+            recordType === 'revenue'
+              ? `${description} 已存在收入记录，点击“覆盖入库”确认是否覆盖。`
+              : `${description} 已存在记录，点击“覆盖入库”确认是否覆盖。`
+
+          setPendingOverwriteMessage(bannerMessage)
+          addImportMessage({
+            id: generateId(),
+            role: 'assistant',
+            content: bannerMessage,
+            createdAt: new Date().toISOString(),
+          })
 
           if (Platform.OS === 'web') {
-            if (window.confirm(promptMessage)) {
-              triggerOverwrite()
-            }
+            window.alert(`${bannerMessage}\n请在提示下面点击“覆盖入库”按钮继续。`)
           } else {
-            Alert.alert('检测到重复记录', promptMessage, [
+            Alert.alert('检测到重复记录', bannerMessage, [
               { text: '取消', style: 'cancel' },
-              { text: '覆盖', onPress: triggerOverwrite },
+              {
+                text: '覆盖',
+                onPress: () => {
+                  setPendingOverwriteMessage(null)
+                  setTimeout(() => {
+                    void executeConfirm(true)
+                  }, 0)
+                },
+              },
             ])
           }
           return
@@ -231,6 +326,28 @@ export default function AIChatScreen() {
     ])
   }, [currentJobId, importPreview, isConfirming, executeConfirm])
 
+  const handlePickFile = useCallback(async () => {
+    try {
+      setIsPickingFile(true)
+      const result = await DocumentPicker.getDocumentAsync({
+        copyToCacheDirectory: true,
+        multiple: false,
+      })
+      if (!('canceled' in result && result.canceled) && result.assets && result.assets.length > 0) {
+        setSelectedFile(result.assets[0])
+      }
+    } catch (error) {
+      console.error('[IMPORT CHAT] pick file failed', error)
+      Alert.alert('选择文件失败', error instanceof Error ? error.message : '未知错误')
+    } finally {
+      setIsPickingFile(false)
+    }
+  }, [])
+
+  const handleRemoveFile = useCallback(() => {
+    setSelectedFile(null)
+  }, [])
+
   const messages = useMemo(() => importChat.slice(-20), [importChat])
 
   return (
@@ -242,15 +359,9 @@ export default function AIChatScreen() {
             <Text style={styles.subtitle}>粘贴文本或说明需求，AI 帮你解析财务数据。</Text>
           </View>
           <View style={styles.links}>
-            <Link href="/(app)/dashboard" style={styles.historyLink}>
-              财务看板
-            </Link>
-            <Link href="/(app)/analysis" style={styles.historyLink}>
-              查询分析
-            </Link>
-            <Link href="/(app)/history" style={styles.historyLink}>
-              历史记录
-            </Link>
+            <NavLink href="/(app)/dashboard" label="财务看板" textStyle={styles.historyLink} />
+            <NavLink href="/(app)/analysis" label="查询分析" textStyle={styles.historyLink} />
+            <NavLink href="/(app)/history" label="历史记录" textStyle={styles.historyLink} />
           </View>
         </View>
 
@@ -265,9 +376,30 @@ export default function AIChatScreen() {
               <Text style={styles.messageContent}>{message.content}</Text>
             </View>
           ))}
+          {pendingOverwriteMessage && (
+            <View style={[styles.messageBubble, styles.assistantBubble]}>
+              <Text style={styles.messageRole}>AI</Text>
+              <Text style={styles.messageContent}>{pendingOverwriteMessage}</Text>
+            </View>
+          )}
         </ScrollView>
 
         <ImportPreview records={importPreview} />
+        {pendingOverwriteMessage && (
+          <View style={styles.overwriteBanner}>
+            <Text style={styles.overwriteText}>{pendingOverwriteMessage}</Text>
+            <TouchableOpacity
+              style={styles.overwriteButton}
+              onPress={() => {
+                setPendingOverwriteMessage(null)
+                void executeConfirm(true)
+              }}
+              disabled={isConfirming}
+            >
+              {isConfirming ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.overwriteButtonText}>覆盖入库</Text>}
+            </TouchableOpacity>
+          </View>
+        )}
         {importPreview.length > 0 && (
           <TouchableOpacity
             style={[styles.confirmButton, (isConfirming || importLoading) && styles.confirmButtonDisabled]}
@@ -287,6 +419,25 @@ export default function AIChatScreen() {
             onChangeText={setCompanyId}
             autoCapitalize="none"
           />
+          <View style={styles.fileRow}>
+            <TouchableOpacity
+              style={[styles.fileButton, (importLoading || isPickingFile) && styles.fileButtonDisabled]}
+              onPress={handlePickFile}
+              disabled={importLoading || isPickingFile}
+            >
+              <Text style={styles.fileButtonText}>{isPickingFile ? '选择中…' : '选择文件'}</Text>
+            </TouchableOpacity>
+            {selectedFile && (
+              <View style={styles.fileInfo}>
+                <Text style={styles.fileName} numberOfLines={1}>
+                  {selectedFile.name ?? '已选择文件'}
+                </Text>
+                <TouchableOpacity onPress={handleRemoveFile}>
+                  <Text style={styles.fileRemove}>移除</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
           <TextInput
             style={styles.textArea}
             placeholder="请输入待解析的财务文本或说明…"
@@ -398,6 +549,39 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlignVertical: 'top',
   },
+  fileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  fileButton: {
+    backgroundColor: '#475569',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    alignSelf: 'flex-start',
+  },
+  fileButtonDisabled: {
+    opacity: 0.7,
+  },
+  fileButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+  },
+  fileInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  fileName: {
+    flex: 1,
+    color: '#CBD5F5',
+    fontSize: 13,
+  },
+  fileRemove: {
+    color: '#F87171',
+    fontSize: 13,
+  },
   sendButton: {
     backgroundColor: '#3B82F6',
     borderRadius: 12,
@@ -422,6 +606,30 @@ const styles = StyleSheet.create({
   confirmButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  overwriteBanner: {
+    backgroundColor: 'rgba(248, 113, 113, 0.15)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    gap: 12,
+  },
+  overwriteText: {
+    color: '#FCA5A5',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  overwriteButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#EF4444',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  overwriteButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
     fontWeight: '600',
   },
 })

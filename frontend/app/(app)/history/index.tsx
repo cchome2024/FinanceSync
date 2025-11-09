@@ -1,9 +1,9 @@
-import { Link } from 'expo-router'
 import { useMemo } from 'react'
 import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { useFinanceStore } from '@/src/state/financeStore'
+import { NavLink } from '@/components/common/NavLink'
 
 export default function HistoryScreen() {
   const { importChat, analysisChat, importPreview, reset } = useFinanceStore()
@@ -21,15 +21,9 @@ export default function HistoryScreen() {
             <Text style={styles.subtitle}>查看最近提交的对话与解析结果</Text>
           </View>
           <View style={styles.links}>
-            <Link href="/(app)/dashboard" style={styles.link}>
-              财务看板
-            </Link>
-            <Link href="/(app)/ai-chat" style={styles.link}>
-              数据录入
-            </Link>
-            <Link href="/(app)/analysis" style={styles.link}>
-              查询分析
-            </Link>
+            <NavLink href="/(app)/dashboard" label="财务看板" textStyle={styles.link} />
+            <NavLink href="/(app)/ai-chat" label="数据录入" textStyle={styles.link} />
+            <NavLink href="/(app)/analysis" label="查询分析" textStyle={styles.link} />
           </View>
         </View>
 

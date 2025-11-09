@@ -2,6 +2,18 @@ import { Platform } from 'react-native'
 
 const baseURL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
 
+export class HttpError extends Error {
+  status: number
+  body: string
+
+  constructor(message: string, status: number, body: string) {
+    super(message)
+    this.name = 'HttpError'
+    this.status = status
+    this.body = body
+  }
+}
+
 export type FetchOptions = RequestInit & {
   authToken?: string
 }
@@ -27,7 +39,7 @@ async function request<T>(path: string, options: FetchOptions = {}): Promise<T> 
   const response = await fetch(url, init)
   if (!response.ok) {
     const text = await response.text()
-    throw new Error(`Request failed: ${response.status} ${text}`)
+    throw new HttpError(`Request failed: ${response.status}`, response.status, text)
   }
 
   if (response.status === 204) {

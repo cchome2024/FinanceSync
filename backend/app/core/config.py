@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     llm_endpoint: str = "https://example.openai.azure.com"
     llm_deployment: str = "gpt-4o"
     llm_api_key: str = "test-key"
+    llm_timeout_seconds: int | None = 120
     storage_provider: str = "local"
     storage_bucket: str = "finance-sync"
     storage_local_path: str = "./storage"

@@ -1,10 +1,10 @@
-import { Link } from 'expo-router'
 import { useCallback, useMemo, useState } from 'react'
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { apiClient } from '@/src/services/apiClient'
 import { useFinanceStore } from '@/src/state/financeStore'
+import { NavLink } from '@/components/common/NavLink'
 
 type AnalysisResponse = {
   queryId: string
@@ -73,12 +73,8 @@ export default function AnalysisChatScreen() {
             <Text style={styles.subtitle}>提出自然语言问题，获取财务洞察与提示。</Text>
           </View>
           <View style={styles.links}>
-            <Link href="/(app)/dashboard" style={styles.historyLink}>
-              财务看板
-            </Link>
-            <Link href="/(app)/ai-chat" style={styles.historyLink}>
-              数据录入
-            </Link>
+            <NavLink href="/(app)/dashboard" label="财务看板" textStyle={styles.historyLink} />
+            <NavLink href="/(app)/ai-chat" label="数据录入" textStyle={styles.historyLink} />
           </View>
         </View>
 

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { Link, useFocusEffect } from 'expo-router'
+import { useFocusEffect } from 'expo-router'
 
 import FinancialTrends, { TrendDatum } from '@/components/charts/FinancialTrends'
 import { apiClient } from '@/src/services/apiClient'
+import { NavLink } from '@/components/common/NavLink'
 
 type BalanceSummary = {
   cash: number
@@ -37,10 +38,30 @@ type FinancialOverviewResponse = {
   companies: CompanyOverview[]
 }
 
+type RevenueSummaryNode = {
+  label: string
+  monthly: number[]
+  total: number
+  children?: RevenueSummaryNode[]
+}
+
+type RevenueSummaryResponse = {
+  year: number
+  companyId?: string | null
+  totals: {
+    monthly: number[]
+    total: number
+  }
+  nodes: RevenueSummaryNode[]
+}
+
 export default function DashboardScreen() {
   const [data, setData] = useState<FinancialOverviewResponse | null>(null)
   const [companyId, setCompanyId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [revenueSummary, setRevenueSummary] = useState<RevenueSummaryResponse | null>(null)
+  const [revenueYear, setRevenueYear] = useState(new Date().getFullYear())
+  const [loadingRevenue, setLoadingRevenue] = useState(false)
 
   const loadOverview = useCallback(async () => {
     setLoading(true)
@@ -60,14 +81,34 @@ export default function DashboardScreen() {
     }
   }, [companyId])
 
-useEffect(() => {
-  loadOverview()
-}, [loadOverview])
+  const loadRevenueSummary = useCallback(async () => {
+    setLoadingRevenue(true)
+    try {
+      const params: Record<string, string> = { year: String(revenueYear) }
+      if (companyId) {
+        params.companyId = companyId
+      }
+      const query = new URLSearchParams(params).toString()
+      const response = await apiClient.get<RevenueSummaryResponse>(`/api/v1/financial/revenue-summary?${query}`)
+      setRevenueSummary(response)
+    } catch (error) {
+      console.error('[DASHBOARD] load revenue summary failed', error)
+      setRevenueSummary(null)
+    } finally {
+      setLoadingRevenue(false)
+    }
+  }, [companyId, revenueYear])
+
+  useEffect(() => {
+    loadOverview()
+    loadRevenueSummary()
+  }, [loadOverview, loadRevenueSummary])
 
 useFocusEffect(
   useCallback(() => {
     loadOverview()
-  }, [loadOverview])
+    loadRevenueSummary()
+  }, [loadOverview, loadRevenueSummary])
 )
 
   const companies = data?.companies ?? []
@@ -97,6 +138,34 @@ useFocusEffect(
     return values
   }, [currentCompany])
 
+  const currentYear = useMemo(() => new Date().getFullYear(), [])
+  const yearOptions = useMemo(() => [currentYear, currentYear - 1, currentYear - 2], [currentYear])
+
+  const revenueRows = useMemo(() => {
+    if (!revenueSummary) {
+      return []
+    }
+
+    const rows: Array<{ key: string; label: string; depth: number; monthly: number[]; total: number }> = []
+
+    const traverse = (nodes: RevenueSummaryNode[], depth = 0, parentKey = '') => {
+      nodes.forEach((node, index) => {
+        const key = `${parentKey}${node.label}-${index}`
+        rows.push({ key, label: node.label, depth, monthly: node.monthly, total: node.total })
+        if (node.children && node.children.length > 0) {
+          traverse(node.children, depth + 1, `${key}>`)
+        }
+      })
+    }
+
+    traverse(revenueSummary.nodes)
+    return rows
+  }, [revenueSummary])
+
+  const formatAmount = useCallback((value: number) => {
+    return value === 0 ? '' : value.toFixed(2)
+  }, [])
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
@@ -106,15 +175,9 @@ useFocusEffect(
             <Text style={styles.subtitle}>{data ? `数据截至 ${data.asOf}` : '加载中...'}</Text>
           </View>
           <View style={styles.links}>
-            <Link href="/(app)/ai-chat" style={styles.link}>
-              数据录入
-            </Link>
-            <Link href="/(app)/analysis" style={styles.link}>
-              查询分析
-            </Link>
-            <Link href="/(app)/history" style={styles.link}>
-              历史记录
-            </Link>
+            <NavLink href="/(app)/ai-chat" label="数据录入" textStyle={styles.link} />
+            <NavLink href="/(app)/analysis" label="查询分析" textStyle={styles.link} />
+            <NavLink href="/(app)/history" label="历史记录" textStyle={styles.link} />
           </View>
         </View>
 
@@ -165,9 +228,7 @@ useFocusEffect(
                 )}
                 <View style={styles.cardFooter}>
                   <Text style={styles.cardHint}>当前显示最新数据</Text>
-                  <Link href="/(app)/dashboard/history" style={styles.cardLink}>
-                    查看历史
-                  </Link>
+                  <NavLink href="/(app)/dashboard/history" label="查看历史" textStyle={styles.cardLink} />
                 </View>
               </View>
 
@@ -188,6 +249,70 @@ useFocusEffect(
           )}
 
           {!loading && <FinancialTrends title="收入 / 支出 / 预期对比" data={revenueVsExpense} />}
+
+          <View style={styles.revenueSection}>
+            <View style={styles.revenueHeader}>
+              <Text style={styles.sectionTitle}>收入汇总</Text>
+              <View style={styles.yearSelector}>
+                {yearOptions.map((year) => (
+                  <TouchableOpacity
+                    key={year}
+                    style={[styles.yearChip, revenueYear === year && styles.yearChipActive]}
+                    onPress={() => setRevenueYear(year)}
+                    disabled={loadingRevenue}
+                  >
+                    <Text style={revenueYear === year ? styles.yearChipTextActive : styles.yearChipText}>{year} 年</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+            {loadingRevenue && (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator color="#60A5FA" />
+                <Text style={styles.loadingText}>正在加载收入汇总...</Text>
+              </View>
+            )}
+            {!loadingRevenue && revenueSummary && revenueRows.length > 0 && (
+              <ScrollView horizontal style={styles.revenueTableContainer}>
+                <View>
+                  <View style={[styles.tableRow, styles.tableHeaderRow]}>
+                    <Text style={[styles.tableHeaderCell, styles.labelColumn]}>分类</Text>
+                    {Array.from({ length: 12 }, (_, index) => (
+                      <Text key={`month-${index}`} style={styles.tableHeaderCell}>
+                        {index + 1} 月
+                      </Text>
+                    ))}
+                    <Text style={[styles.tableHeaderCell, styles.totalColumn]}>合计</Text>
+                  </View>
+                  {revenueRows.map((row) => (
+                    <View key={row.key} style={styles.tableRow}>
+                      <Text style={[styles.tableCell, styles.labelColumn, { paddingLeft: 16 + row.depth * 16 }]}>
+                        {row.label}
+                      </Text>
+                      {row.monthly.map((value, idx) => (
+                        <Text key={`${row.key}-m-${idx}`} style={styles.tableCell}>
+                          {formatAmount(value)}
+                        </Text>
+                      ))}
+                      <Text style={[styles.tableCell, styles.totalColumn]}>{formatAmount(row.total)}</Text>
+                    </View>
+                  ))}
+                  <View style={[styles.tableRow, styles.tableTotalRow]}>
+                    <Text style={[styles.tableCell, styles.labelColumn]}>合计</Text>
+                    {revenueSummary.totals.monthly.map((value, idx) => (
+                      <Text key={`total-${idx}`} style={styles.tableCell}>
+                        {formatAmount(value)}
+                      </Text>
+                    ))}
+                    <Text style={[styles.tableCell, styles.totalColumn]}>{formatAmount(revenueSummary.totals.total)}</Text>
+                  </View>
+                </View>
+              </ScrollView>
+            )}
+            {!loadingRevenue && (!revenueSummary || revenueRows.length === 0) && (
+              <Text style={styles.loadingText}>暂无收入数据。</Text>
+            )}
+          </View>
         </ScrollView>
       </View>
     </SafeAreaView>
@@ -301,6 +426,86 @@ const styles = StyleSheet.create({
   cardLink: {
     color: '#60A5FA',
     fontSize: 12,
+  },
+  revenueSection: {
+    marginTop: 24,
+    backgroundColor: '#131A2B',
+    borderRadius: 16,
+    padding: 16,
+    gap: 16,
+  },
+  revenueHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  sectionTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  yearSelector: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  yearChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(96, 165, 250, 0.35)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  yearChipActive: {
+    backgroundColor: '#3B82F6',
+    borderColor: '#3B82F6',
+  },
+  yearChipText: {
+    color: '#60A5FA',
+    fontSize: 13,
+  },
+  yearChipTextActive: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  revenueTableContainer: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  tableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+  },
+  tableHeaderRow: {
+    backgroundColor: 'rgba(30, 64, 175, 0.5)',
+  },
+  tableTotalRow: {
+    backgroundColor: 'rgba(30, 64, 175, 0.35)',
+  },
+  tableHeaderCell: {
+    color: '#E2E8F0',
+    fontSize: 13,
+    fontWeight: '600',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    minWidth: 72,
+    textAlign: 'right',
+  },
+  tableCell: {
+    color: '#F8FAFC',
+    fontSize: 13,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    minWidth: 72,
+    textAlign: 'right',
+  },
+  labelColumn: {
+    minWidth: 180,
+    textAlign: 'left',
+  },
+  totalColumn: {
+    minWidth: 96,
   },
 })
 

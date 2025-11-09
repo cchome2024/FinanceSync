@@ -47,6 +47,32 @@ class FinancialOverview(BaseModel):
     companies: List[CompanyOverview]
 
 
+class RevenueSummaryNode(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    label: str
+    monthly: List[float]
+    total: float
+    children: List['RevenueSummaryNode'] = Field(default_factory=list)
+
+
+class RevenueSummaryTotals(BaseModel):
+    monthly: List[float]
+    total: float
+
+
+class RevenueSummaryResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    year: int
+    company_id: Optional[str] = Field(alias="companyId", default=None)
+    totals: RevenueSummaryTotals
+    nodes: List[RevenueSummaryNode] = Field(default_factory=list)
+
+
+RevenueSummaryNode.model_rebuild()
+
+
 class BalanceHistoryItem(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from json import JSONDecodeError
 from typing import Any, Dict, Iterable
 
 import httpx
@@ -12,6 +13,14 @@ class LLMClientError(RuntimeError):
     """LLM 调用失败时抛出的异常。"""
 
 
+class LLMClientParseError(LLMClientError):
+    """LLM 返回内容无法解析为结构化 JSON 时抛出的异常。"""
+
+    def __init__(self, message: str, raw_text: str) -> None:
+        super().__init__(message)
+        self.raw_text = raw_text
+
+
 class LLMClient:
     """封装与 LLM 服务的交互。"""
 
@@ -21,7 +30,8 @@ class LLMClient:
         self._deployment = settings.llm_deployment
         self._api_key = settings.llm_api_key
         self._provider = settings.llm_provider
-        self._client = httpx.AsyncClient(timeout=60)
+        timeout = getattr(settings, "llm_timeout_seconds", 0) or 120
+        self._client = httpx.AsyncClient(timeout=timeout)
 
     async def parse_financial_payload(self, prompt: str, attachments: Iterable[bytes] | None = None) -> Dict[str, Any]:
         if self._provider == "mock":
@@ -47,7 +57,8 @@ class LLMClient:
         response = await self._request(payload)
         print(f"[LLM RESPONSE] provider={self._provider}, raw={str(response)[:2000]}", flush=True)
         try:
-            return json.loads(response["choices"][0]["message"]["content"])
+            content = response["choices"][0]["message"]["content"]
+            return self._parse_json_content(content)
         except (KeyError, ValueError) as exc:
             raise LLMClientError("Failed to parse LLM response") from exc
 
@@ -100,6 +111,19 @@ class LLMClient:
             print(f"[LLM ERROR] body={response.text[:2000]}", flush=True)
             raise LLMClientError(f"LLM request failed: {response.status_code} {response.text}")
         return response.json()
+
+    def _parse_json_content(self, text: str) -> Dict[str, Any]:
+        try:
+            return json.loads(text)
+        except JSONDecodeError:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                try:
+                    return json.loads(text[start : end + 1])
+                except JSONDecodeError as exc:
+                    raise LLMClientParseError("LLM response is not valid JSON", text) from exc
+            raise LLMClientParseError("LLM response is not valid JSON", text)
 
     def _build_system_prompt(self) -> str:
         return (

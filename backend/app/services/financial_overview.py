@@ -3,26 +3,29 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.financial import (
     AccountBalance,
     Company,
     ExpenseRecord,
+    FinanceCategory,
     IncomeForecast,
     RevenueRecord,
     Certainty,
 )
 from app.schemas.overview import (
-    BalanceHistoryItem,
     BalanceSummary,
     CompanyOverview,
     FinancialOverview,
     FlowSummary,
     ForecastSummary,
+    RevenueSummaryNode,
+    RevenueSummaryResponse,
+    RevenueSummaryTotals,
 )
 
 
@@ -216,6 +219,96 @@ class FinancialOverviewService:
                 )
             )
         return history
+
+    def get_revenue_summary(self, year: Optional[int] = None, company_id: Optional[str] = None) -> RevenueSummaryResponse:
+        if year is None:
+            year = datetime.now(UTC).year
+
+        stmt = (
+            select(RevenueRecord, FinanceCategory)
+            .outerjoin(FinanceCategory, RevenueRecord.category_ref)
+            .where(func.strftime('%Y', RevenueRecord.month) == str(year))
+        )
+        if company_id:
+            stmt = stmt.where(RevenueRecord.company_id == company_id)
+
+        results = self._session.execute(stmt).all()
+
+        if not results:
+            return RevenueSummaryResponse(
+                year=year,
+                companyId=company_id,
+                totals=RevenueSummaryTotals(monthly=[0.0] * 12, total=0.0),
+                nodes=[],
+            )
+
+        totals_by_path: Dict[Tuple[str, ...], List[float]] = {}
+        totals_sum: Dict[Tuple[str, ...], float] = {}
+        root_order: List[Tuple[str, ...]] = []
+        children_order: Dict[Tuple[str, ...], List[Tuple[str, ...]]] = {}
+
+        def ensure_path(path: Tuple[str, ...]) -> None:
+            if path not in totals_by_path:
+                totals_by_path[path] = [0.0] * 12
+                totals_sum[path] = 0.0
+
+        def add_child(parent: Tuple[str, ...], child: Tuple[str, ...]) -> None:
+            children = children_order.setdefault(parent, [])
+            if child not in children:
+                children.append(child)
+
+        for record, category in results:
+            amount = self._to_float(record.amount)
+            month_idx = record.month.month - 1
+
+            if category and category.full_path:
+                path_segments = [segment for segment in category.full_path.split('/') if segment]
+            else:
+                path_segments = [segment for segment in [record.category, record.subcategory] if segment]
+
+            if not path_segments:
+                path_segments = ['未分类']
+
+            tuple_path = tuple(path_segments)
+
+            for depth in range(1, len(tuple_path) + 1):
+                subpath = tuple_path[:depth]
+                ensure_path(subpath)
+                totals_by_path[subpath][month_idx] += amount
+                totals_sum[subpath] += amount
+
+                if depth == 1 and subpath not in root_order:
+                    root_order.append(subpath)
+                if depth > 1:
+                    parent = tuple_path[: depth - 1]
+                    add_child(parent, subpath)
+
+        def build_node(path: Tuple[str, ...]) -> RevenueSummaryNode:
+            children = [build_node(child) for child in children_order.get(path, [])]
+            monthly = [round(value, 2) for value in totals_by_path[path]]
+            total_value = round(totals_sum[path], 2)
+            return RevenueSummaryNode(
+                label=path[-1],
+                monthly=monthly,
+                total=total_value,
+                children=children,
+            )
+
+        nodes = [build_node(path) for path in root_order]
+
+        grand_monthly = [0.0] * 12
+        for path in root_order:
+            for idx, value in enumerate(totals_by_path[path]):
+                grand_monthly[idx] += value
+        grand_totals = [round(value, 2) for value in grand_monthly]
+        grand_total_value = round(sum(grand_monthly), 2)
+
+        return RevenueSummaryResponse(
+            year=year,
+            companyId=company_id,
+            totals=RevenueSummaryTotals(monthly=grand_totals, total=grand_total_value),
+            nodes=nodes,
+        )
 
 
 
