@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from backend.app.core.config import get_settings
+from app.core.config import get_settings
 
 
 class StorageAdapter(Protocol):

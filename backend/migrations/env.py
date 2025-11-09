@@ -7,11 +7,14 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 
 import sys
-BASE_DIR = Path(__file__).resolve().parents[2]
-if str(BASE_DIR) not in sys.path:
-    sys.path.append(str(BASE_DIR))
+BASE_DIR = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = BASE_DIR.parent
+for path in [str(BASE_DIR), str(PROJECT_ROOT)]:
+    if path not in sys.path:
+        sys.path.append(path)
 
-from backend.app.models.base import Base  # noqa: E402
+from app.models.base import Base  # noqa: E402
+from app.models import financial  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

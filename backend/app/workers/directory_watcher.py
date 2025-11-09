@@ -6,8 +6,8 @@ from typing import Iterable
 
 from watchfiles import awatch
 
-from backend.app.core.config import get_settings
-from backend.app.workers import celery_app
+from app.core.config import get_settings
+from app.workers import celery_app
 
 
 async def watch_directories() -> None:
@@ -17,11 +17,8 @@ async def watch_directories() -> None:
         return
 
     async for changes in awatch(*directories, poll_delay=settings.watch_poll_interval_seconds):
-        for change_type, path in changes:
-            celery_app.send_task(
-                "backend.app.workers.import_processor.schedule_file_import",
-                kwargs={"file_path": path, "change_type": change_type.name},
-            )
+        for _, path in changes:
+            celery_app.send_task("app.workers.import_processor.enqueue_file", kwargs={"file_path": path})
 
 
 def _parse_directories(value: str) -> Iterable[Path]:

@@ -2,26 +2,24 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import BaseSettings, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    database_url: str = Field(..., env="DATABASE_URL")
-    redis_url: str = Field(..., env="REDIS_URL")
-    llm_provider: str = Field("azure_openai", env="LLM_PROVIDER")
-    llm_endpoint: str = Field(..., env="LLM_ENDPOINT")
-    llm_deployment: str = Field(..., env="LLM_DEPLOYMENT")
-    llm_api_key: str = Field(..., env="LLM_API_KEY")
-    storage_provider: str = Field("local", env="STORAGE_PROVIDER")
-    storage_bucket: str = Field("finance-sync", env="STORAGE_BUCKET")
-    storage_local_path: str = Field("./storage", env="STORAGE_LOCAL_PATH")
-    watch_directories: str = Field("", env="WATCH_DIRECTORIES")
-    watch_poll_interval_seconds: int = Field(30, env="WATCH_POLL_INTERVAL_SECONDS")
-    log_level: str = Field("INFO", env="LOG_LEVEL")
+    database_url: str = "sqlite:///./finance_sync.db"
+    redis_url: str = "redis://localhost:6379/0"
+    llm_provider: str = "azure_openai"
+    llm_endpoint: str = "https://example.openai.azure.com"
+    llm_deployment: str = "gpt-4o"
+    llm_api_key: str = "test-key"
+    storage_provider: str = "local"
+    storage_bucket: str = "finance-sync"
+    storage_local_path: str = "./storage"
+    watch_directories: str = ""
+    watch_poll_interval_seconds: int = 30
+    log_level: str = "INFO"
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
 
 @lru_cache(maxsize=1)

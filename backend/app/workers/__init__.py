@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from celery import Celery
 
-from backend.app.core.config import get_settings
+from app.core.config import get_settings
 
 settings = get_settings()
 
@@ -15,8 +15,8 @@ celery_app = Celery(
 celery_app.conf.update(
     task_default_queue="financesync-default",
     task_routes={
-        "backend.app.workers.import_processor.*": {"queue": "import-jobs"},
-        "backend.app.workers.directory_watcher.*": {"queue": "watcher"},
+        "app.workers.import_processor.*": {"queue": "import-jobs"},
+        "app.workers.directory_watcher.*": {"queue": "watcher"},
     },
     task_serializer="json",
     result_serializer="json",

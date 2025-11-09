@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable
 
 import httpx
 
-from backend.app.core.config import get_settings
+from app.core.config import get_settings
 
 
 class LLMClientError(RuntimeError):
-    pass
+    """LLM 调用失败时抛出的异常。"""
 
 
 class LLMClient:
-    """LLM 客户端封装，负责与供应商通信并输出结构化结果�?""
+    """封装与 LLM 服务的交互。"""
 
     def __init__(self) -> None:
         settings = get_settings()
@@ -23,8 +23,12 @@ class LLMClient:
         self._provider = settings.llm_provider
         self._client = httpx.AsyncClient(timeout=60)
 
-    async def parse_financial_payload(self, prompt: str, attachments: List[bytes] | None = None) -> Dict[str, Any]:
-        """调用 LLM 将非结构化数据解析为财务结构化条目�?""
+    async def parse_financial_payload(self, prompt: str, attachments: Iterable[bytes] | None = None) -> Dict[str, Any]:
+        if self._provider == "mock":
+            print("[LLM MOCK] parse_financial_payload invoked; returning empty records")
+            return {
+                "records": []
+            }
 
         payload: Dict[str, Any] = {
             "messages": [
@@ -34,16 +38,24 @@ class LLMClient:
             "temperature": 0.1,
             "response_format": {"type": "json_object"},
         }
-        if attachments:
-            payload["attachments"] = ["<binary:{}>".format(len(item)) for item in attachments]
 
+        attach_list = list(attachments or [])
+        if attach_list:
+            payload["attachments"] = [f"<binary:{len(item)}>" for item in attach_list]
+
+        print(f"[LLM REQUEST] provider={self._provider}, endpoint={self._endpoint}, payload={json.dumps(payload, ensure_ascii=False)[:2000]}", flush=True)
         response = await self._request(payload)
+        print(f"[LLM RESPONSE] provider={self._provider}, raw={str(response)[:2000]}", flush=True)
         try:
             return json.loads(response["choices"][0]["message"]["content"])
         except (KeyError, ValueError) as exc:
             raise LLMClientError("Failed to parse LLM response") from exc
 
-    async def run_nlq(self, question: str, schema_snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    async def run_nlq(self, question: str, schema_snapshot: Dict[str, Any]) -> str:
+        if self._provider == "mock":
+            print("[LLM MOCK] run_nlq invoked; returning empty JSON string")
+            return "{}"
+
         payload = {
             "messages": [
                 {"role": "system", "content": self._build_nlq_prompt(schema_snapshot)},
@@ -51,38 +63,86 @@ class LLMClient:
             ],
             "temperature": 0.0,
         }
+        print(f"[LLM REQUEST] provider={self._provider}, endpoint={self._endpoint}, payload={json.dumps(payload, ensure_ascii=False)[:2000]}", flush=True)
         response = await self._request(payload)
+        print(f"[LLM RESPONSE] provider={self._provider}, raw={str(response)[:2000]}", flush=True)
         try:
             return response["choices"][0]["message"]["content"]
         except (KeyError, ValueError) as exc:
             raise LLMClientError("LLM response missing content") from exc
 
-    async def _request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        if self._provider != "azure_openai":
-            raise LLMClientError(f"Unsupported LLM provider: {self._provider}")
+    async def close(self) -> None:
+        await self._client.aclose()
 
-        url = f"{self._endpoint}/openai/deployments/{self._deployment}/chat/completions?api-version=2024-02-01"
-        headers = {
-            "api-key": self._api_key,
-            "Content-Type": "application/json",
-        }
+    async def _request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if self._provider == "azure_openai":
+            url = f"{self._endpoint}/openai/deployments/{self._deployment}/chat/completions?api-version=2024-02-01"
+            headers = {
+                "api-key": self._api_key,
+                "Content-Type": "application/json",
+            }
+        elif self._provider == "mock":
+            print("[LLM MOCK] _request bypassed")
+            return {"choices": [{"message": {"content": "{}"}}]}
+        else:
+            url = f"{self._endpoint.rstrip('/')}/v1/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = dict(payload)
+            payload.setdefault("model", self._deployment)
+
+        print(f"[LLM HTTP] POST {url} headers={headers}", flush=True)
         response = await self._client.post(url, headers=headers, json=payload)
+        print(f"[LLM HTTP] status={response.status_code}", flush=True)
         if response.status_code >= 400:
+            print(f"[LLM ERROR] body={response.text[:2000]}", flush=True)
             raise LLMClientError(f"LLM request failed: {response.status_code} {response.text}")
         return response.json()
 
     def _build_system_prompt(self) -> str:
         return (
-            "你是一名财务数据解析助手。根据用户提供的文本或表格，"
-            "输出包含账户余额、收入、支出、收入预测的 JSON，字段需符合平台 schema�?
+            "你是 FinanceSync 的财务数据解析助手。请从用户提供的原始文本或表格中，"
+            "抽取结构化财务信息，并严格按照下述 JSON Schema 输出。"
+            "结果必须是单个 JSON 对象，且仅包含一个顶层键 `records`。不可输出解释性文字。\n"
+            "JSON 结构示例：\n"
+            "{\n"
+            "  \"records\": [\n"
+            "    {\n"
+            "      \"record_type\": \"account_balance\",\n"
+            "      \"payload\": { ... },\n"
+            "      \"confidence\": 0.93,\n"
+            "      \"warnings\": []\n"
+            "    }\n"
+            "  ]\n"
+            "}\n"
+            "字段说明：\n"
+            "- `record_type`: 必填，使用以下枚举之一：\n"
+            "  - `account_balance`: 账户余额。\n"
+            "  - `revenue`: 收入记录（按月份统计）。\n"
+            "  - `expense`: 支出记录（按月份统计）。\n"
+            "  - `income_forecast`: 未来收入预测。\n"
+            "- `payload`: 对应记录的详细字段。不同 record_type 需要的字段如下：\n"
+            "  * account_balance: `company_id`(字符串，若未知留空), `reported_at`(ISO8601日期时间), `cash_balance`(数字), `investment_balance`(数字, 可为0), `total_balance`(数字), `currency`(字符串, 缺省填 \"CNY\"), `notes`(可选字符串)。\n"
+            "  * revenue: `company_id`, `month`(YYYY-MM-DD, 使用当月1日), `category`(字符串), `subcategory`(可选字符串), `amount`(数字), `currency`(默认 \"CNY\"), `confidence`(可选0-1小数), `notes`(可选)。\n"
+            "  * expense: `company_id`, `month`, `category`, `amount`, `currency`(默认 \"CNY\"), `confidence`(可选), `notes`(可选)。\n"
+            "  * income_forecast: `company_id`, `cash_in_date`(YYYY-MM-DD), `product_line`(可选), `product_name`(可选), `certainty`(枚举 `certain` 或 `uncertain`), `category`(可选字符串), `expected_amount`(数字), `currency`(默认 \"CNY\"), `confidence`(可选), `notes`(可选)。\n"
+            "- `confidence`: 可选，若给出需为 0-1 之间的小数。\n"
+            "- `warnings`: 可选字符串数组，若无预警请输出空数组。\n"
+            "其它要求：\n"
+            "1. 所有数字字段输出十进制数字，不要包含单位或千分符。\n"
+            "2. 若文本中无法确认某字段，请省略该字段或使用合理默认值，不要编造。\n"
+            "3. 如果无法提取任何记录，返回 `{\"records\": []}`。"
         )
 
     def _build_nlq_prompt(self, schema_snapshot: Dict[str, Any]) -> str:
         return (
-            "你是一�?SQL 生成专家。请参考以下数据库结构并生成安全、只读的 SQL�?
+            "你是一名 SQL 生成专家。请参考以下数据库结构并生成安全、只读的 SQL。"
             f" 数据结构: {json.dumps(schema_snapshot)}"
         )
 
 
 async def get_llm_client() -> LLMClient:
     return LLMClient()
+

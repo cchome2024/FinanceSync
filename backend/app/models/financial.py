@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import enum
+import uuid
 from datetime import datetime, date
+from typing import Optional
 
 from sqlalchemy import (
-    Boolean,
-    Column,
     Date,
     DateTime,
     Enum,
@@ -16,8 +16,9 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    JSON,
+    Boolean,
 )
-from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -49,10 +50,38 @@ class NlqChartType(str, enum.Enum):
     TABLE = "table"
 
 
+class CategoryType(str, enum.Enum):
+    REVENUE = "revenue"
+    EXPENSE = "expense"
+    FORECAST = "forecast"
+
+
+class FinanceCategory(Base):
+    __tablename__ = "finance_categories"
+    __table_args__ = (
+        UniqueConstraint("category_type", "full_path", name="uq_finance_category_path"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    category_type: Mapped[CategoryType] = mapped_column(Enum(CategoryType), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    parent_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("finance_categories.id", ondelete="SET NULL"))
+    level: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    full_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    parent: Mapped[Optional["FinanceCategory"]] = relationship(remote_side="FinanceCategory.id", back_populates="children")
+    children: Mapped[list["FinanceCategory"]] = relationship(back_populates="parent")
+
+    revenue_records: Mapped[list["RevenueRecord"]] = relationship(back_populates="category_ref")
+    expense_records: Mapped[list["ExpenseRecord"]] = relationship(back_populates="category_ref")
+    income_forecasts: Mapped[list["IncomeForecast"]] = relationship(back_populates="category_ref")
+
+
 class Company(Base):
     __tablename__ = "companies"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(128), nullable=False)
     currency: Mapped[str] = mapped_column(String(8), default="CNY")
@@ -70,10 +99,10 @@ class Company(Base):
 class ImportJob(Base):
     __tablename__ = "import_jobs"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     source_type: Mapped[ImportSource] = mapped_column(Enum(ImportSource), nullable=False)
     status: Mapped[ImportStatus] = mapped_column(Enum(ImportStatus), nullable=False, default=ImportStatus.PENDING_REVIEW)
-    initiator_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True))
+    initiator_id: Mapped[str | None] = mapped_column(String(36))
     initiator_role: Mapped[str | None] = mapped_column(String(64))
     llm_model: Mapped[str | None] = mapped_column(String(64))
     confidence_score: Mapped[float | None] = mapped_column(Float)
@@ -89,8 +118,8 @@ class ImportJob(Base):
 class Attachment(Base):
     __tablename__ = "attachments"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True)
-    import_job_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("import_jobs.id"), nullable=False)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    import_job_id: Mapped[str] = mapped_column(String(36), ForeignKey("import_jobs.id"), nullable=False)
     file_type: Mapped[str] = mapped_column(String(32), nullable=False)
     storage_path: Mapped[str] = mapped_column(String(255), nullable=False)
     text_snapshot: Mapped[str | None] = mapped_column(Text)
@@ -106,9 +135,9 @@ class AccountBalance(Base):
         UniqueConstraint("company_id", "reported_at", name="uq_account_balance_company_reported"),
     )
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True)
-    company_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
-    import_job_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("import_jobs.id"))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id: Mapped[str] = mapped_column(String(36), ForeignKey("companies.id"), nullable=False)
+    import_job_id: Mapped[str] = mapped_column(String(36), ForeignKey("import_jobs.id"))
     reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     cash_balance: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     investment_balance: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
@@ -123,9 +152,10 @@ class AccountBalance(Base):
 class RevenueRecord(Base):
     __tablename__ = "revenue_records"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True)
-    company_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
-    import_job_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("import_jobs.id"))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id: Mapped[str] = mapped_column(String(36), ForeignKey("companies.id"), nullable=False)
+    import_job_id: Mapped[str] = mapped_column(String(36), ForeignKey("import_jobs.id"))
+    category_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("finance_categories.id"))
     month: Mapped[date] = mapped_column(Date, nullable=False)
     category: Mapped[str] = mapped_column(String(64), nullable=False)
     subcategory: Mapped[str | None] = mapped_column(String(64))
@@ -136,14 +166,16 @@ class RevenueRecord(Base):
 
     company: Mapped[Company] = relationship(back_populates="revenue_records")
     import_job: Mapped[ImportJob] = relationship()
+    category_ref: Mapped[Optional["FinanceCategory"]] = relationship(back_populates="revenue_records")
 
 
 class ExpenseRecord(Base):
     __tablename__ = "expense_records"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True)
-    company_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
-    import_job_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("import_jobs.id"))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id: Mapped[str] = mapped_column(String(36), ForeignKey("companies.id"), nullable=False)
+    import_job_id: Mapped[str] = mapped_column(String(36), ForeignKey("import_jobs.id"))
+    category_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("finance_categories.id"))
     month: Mapped[date] = mapped_column(Date, nullable=False)
     category: Mapped[str] = mapped_column(String(64), nullable=False)
     amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
@@ -153,14 +185,16 @@ class ExpenseRecord(Base):
 
     company: Mapped[Company] = relationship(back_populates="expense_records")
     import_job: Mapped[ImportJob] = relationship()
+    category_ref: Mapped[Optional["FinanceCategory"]] = relationship(back_populates="expense_records")
 
 
 class IncomeForecast(Base):
     __tablename__ = "income_forecasts"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True)
-    company_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
-    import_job_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("import_jobs.id"))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id: Mapped[str] = mapped_column(String(36), ForeignKey("companies.id"), nullable=False)
+    import_job_id: Mapped[str] = mapped_column(String(36), ForeignKey("import_jobs.id"))
+    category_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("finance_categories.id"))
     cash_in_date: Mapped[date] = mapped_column(Date, nullable=False)
     product_line: Mapped[str | None] = mapped_column(String(64))
     product_name: Mapped[str | None] = mapped_column(String(64))
@@ -173,19 +207,20 @@ class IncomeForecast(Base):
 
     company: Mapped[Company] = relationship(back_populates="income_forecasts")
     import_job: Mapped[ImportJob] = relationship()
+    category_ref: Mapped[Optional["FinanceCategory"]] = relationship(back_populates="income_forecasts")
 
 
 class ConfirmationLog(Base):
     __tablename__ = "confirmation_logs"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True)
-    import_job_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("import_jobs.id"), nullable=False)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    import_job_id: Mapped[str] = mapped_column(String(36), ForeignKey("import_jobs.id"), nullable=False)
     record_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    record_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True))
-    actor_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True))
+    record_id: Mapped[str | None] = mapped_column(String(36))
+    actor_id: Mapped[str | None] = mapped_column(String(36))
     actor_role: Mapped[str | None] = mapped_column(String(64))
     action: Mapped[str] = mapped_column(String(32), nullable=False)
-    diff_snapshot: Mapped[dict | None] = mapped_column(JSONB)
+    diff_snapshot: Mapped[dict | None] = mapped_column(JSON)
     comment: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
@@ -195,13 +230,13 @@ class ConfirmationLog(Base):
 class NlqQuery(Base):
     __tablename__ = "nlq_queries"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True)
-    actor_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    actor_id: Mapped[str | None] = mapped_column(String(36))
     question: Mapped[str] = mapped_column(Text, nullable=False)
     generated_sql: Mapped[str | None] = mapped_column(Text)
     execution_result_ref: Mapped[str | None] = mapped_column(String(255))
     chart_type: Mapped[NlqChartType | None] = mapped_column(Enum(NlqChartType))
-    chart_config: Mapped[dict | None] = mapped_column(JSONB)
+    chart_config: Mapped[dict | None] = mapped_column(JSON)
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)

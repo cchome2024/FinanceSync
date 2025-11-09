@@ -27,7 +27,7 @@
 
 - [x] T001 更新 Celery、watchfiles、SQLGlot、pandas 依赖到 `backend/pyproject.toml`
 - [x] T002 更新 Victory Native、React Query、Zustand 依赖到 `frontend/package.json`
-- [x] T003 同步环境变量模板以支持 LLM/Redis/监控目录配置 `backend/.env.example`
+- [x] T003 同步环境变量模板以支持 LLM/Redis/监控目录配置 `backend//.env.example`
 - [x] T004 添加前端 API 基址与聊天助手配置项 `frontend/.env.example`
 
 ---
@@ -55,21 +55,25 @@
 
 ### Tests for User Story 1 ⚠️
 
-- [ ] T013 [P] [US1] 编写 `/api/v1/parse/upload` 契约测试 `backend/tests/contract/test_parse_upload.py`
-- [ ] T014 [US1] 实现导入流程集成测试（上传→确认→入库） `backend/tests/integration/test_import_flow.py`
+- [x] T013 [P] [US1] 编写 `/api/v1/parse/upload` 契约测试 `backend/tests/contract/test_parse_upload.py`
+- [x] T014 [US1] 实现导入流程集成测试（上传→确认→入库） `backend/tests/integration/test_import_flow.py`
 
 ### Implementation for User Story 1
 
-- [ ] T015 [P] [US1] 定义导入与校验 Pydantic 模型 `backend/app/schemas/imports.py`
-- [ ] T016 [P] [US1] 实现 ImportJob 仓储层 `backend/app/repositories/import_jobs.py`
-- [ ] T017 [US1] 开发 AI 解析编排服务（包含预处理与 LLM 函数调用） `backend/app/services/ai_parser.py`
-- [ ] T018 [US1] 实现 Celery 导入处理任务逻辑 `backend/app/workers/import_processor.py`
-- [ ] T019 [US1] 构建 `/api/v1/parse/upload` 与 `/api/v1/import-jobs/{id}` API `backend/app/api/v1/imports.py`
-- [ ] T020 [P] [US1] 实现导入确认与审计记录写入 `backend/app/api/v1/imports_confirm.py`
-- [ ] T021 [US1] 完成目录监控触发与去重逻辑 `backend/app/workers/directory_watcher.py`
-- [ ] T022 [P] [US1] 实现 AI 聊天上传与解析 UI `frontend/app/(app)/ai-chat/index.tsx`
-- [ ] T023 [P] [US1] 创建候选记录预览与校验提示组件 `frontend/components/imports/ImportPreview.tsx`
-- [ ] T024 [US1] 构建导入历史视图供财务追溯 `frontend/app/(app)/history/index.tsx`
+- [x] T015 [P] [US1] 定义导入与校验 Pydantic 模型 `backend/app/schemas/imports.py`
+- [x] T016 [P] [US1] 实现 ImportJob 仓储层 `backend/app/repositories/import_jobs.py`
+- [x] T017 [US1] 开发 AI 解析编排服务（包含预处理与 LLM 函数调用） `backend/app/services/ai_parser.py`
+- [x] T018 [US1] 实现 Celery 导入处理任务逻辑 `backend/app/workers/import_processor.py`
+- [x] T019 [US1] 构建 `/api/v1/parse/upload` 与 `/api/v1/import-jobs/{id}` API `backend/app/api/v1/imports.py`
+- [x] T020 [P] [US1] 实现导入确认与审计记录写入 `backend/app/api/v1/imports_confirm.py`
+- [x] T021 [US1] 完成目录监控触发与去重逻辑 `backend/app/workers/directory_watcher.py`
+- [x] T022 [P] [US1] 实现 AI 聊天上传与解析 UI `frontend/app/(app)/ai-chat/index.tsx`
+- [x] T023 [P] [US1] 创建候选记录预览与校验提示组件 `frontend/components/imports/ImportPreview.tsx`
+- [x] T024 [US1] 构建导入历史视图供财务追溯 `frontend/app/(app)/history/index.tsx`
+- [x] T024A [US1] 设计收入/支出/预期收入分类树结构表并更新模型、迁移脚本
+- [x] T024B [US1] 调整业务记录引用新的分类表，确保导入与展示兼容
+- [x] T024C [US1] 拆分“数据录入”与“查询分析”两套 AI 对话路由及状态管理 `frontend/app/(app)`
+- [x] T024D [US1] 后端会话上下文与日志按对话类型区分存储，接口层暴露独立端点
 
 **Checkpoint**: AI 对话导入流程可从输入到确认全程跑通并写入数据库。
 

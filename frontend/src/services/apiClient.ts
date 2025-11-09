@@ -7,25 +7,27 @@ export type FetchOptions = RequestInit & {
 }
 
 async function request<T>(path: string, options: FetchOptions = {}): Promise<T> {
-  const url = ${baseURL}
+  const url = `${baseURL}${path}`
   const headers: HeadersInit = {
     Accept: 'application/json',
     ...(options.headers ?? {}),
   }
 
   if (options.authToken) {
-    headers.Authorization = Bearer 
+    headers.Authorization = `Bearer ${options.authToken}`
   }
+
+  const init: RequestInit = { ...options, headers }
 
   if (options.body && !(options.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json'
-    options.body = JSON.stringify(options.body)
+    init.body = JSON.stringify(options.body)
   }
 
-  const response = await fetch(url, { ...options, headers })
+  const response = await fetch(url, init)
   if (!response.ok) {
     const text = await response.text()
-    throw new Error(Request failed:  )
+    throw new Error(`Request failed: ${response.status} ${text}`)
   }
 
   if (response.status === 204) {
