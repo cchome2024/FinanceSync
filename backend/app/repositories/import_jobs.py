@@ -4,6 +4,7 @@ import json
 from datetime import UTC, date, datetime
 from typing import Any, Dict, Iterable, Sequence
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.financial import (
@@ -17,10 +18,20 @@ from app.models.financial import (
     ImportStatus,
     IncomeForecast,
     RevenueRecord,
+    Company,
     CategoryType,
 )
 from app.schemas.imports import CandidateRecord, ConfirmationAction, ConfirmationOperation, RecordType
 from app.services.category_service import FinanceCategoryService
+
+
+class DuplicateRecordError(RuntimeError):
+    """Raised when a record already exists and overwrite was not permitted."""
+
+    def __init__(self, record_type: RecordType, conflict: Dict[str, Any]):
+        self.record_type = record_type
+        self.conflict = conflict
+        super().__init__("Duplicate record detected")
 
 
 class ImportJobRepository:
@@ -96,7 +107,11 @@ class ImportJobRepository:
     # ------------------------------------------------------------------ #
     # Confirmation & persistence
     # ------------------------------------------------------------------ #
-    def apply_confirmation(self, job: ImportJob, actions: Iterable[ConfirmationAction]) -> tuple[int, int, list[CandidateRecord]]:
+    def apply_confirmation(
+        self,
+        job: ImportJob,
+        actions: Iterable[ConfirmationAction],
+    ) -> tuple[int, int, list[CandidateRecord]]:
         approved = 0
         rejected = 0
         resulting_records: list[CandidateRecord] = []
@@ -113,10 +128,15 @@ class ImportJobRepository:
 
             payload = action.payload
             if payload is None:
-                candidates = preview_lookup.get(action.record_type, [])
-                payload = candidates.pop(0).payload if candidates else {}
+                candidate_list = preview_lookup.get(action.record_type, [])
+                payload = candidate_list.pop(0).payload if candidate_list else {}
 
-            record_id = self._persist_record(job, action.record_type, payload)
+            record_id = self._persist_record(
+                job,
+                action.record_type,
+                payload,
+                overwrite=bool(action.overwrite),
+            )
             approved += 1
             self._log(job, action, record_id=record_id)
             resulting_records.append(
@@ -144,13 +164,48 @@ class ImportJobRepository:
         )
         self._session.add(log)
 
-    def _persist_record(self, job: ImportJob, record_type: RecordType, payload: Dict[str, Any]) -> str:
+    _placeholder_company_id = "company-unknown"
+
+    def _persist_record(
+        self,
+        job: ImportJob,
+        record_type: RecordType,
+        payload: Dict[str, Any],
+        *,
+        overwrite: bool,
+    ) -> str:
         """根据 record_type 保存财务数据，并返回记录 ID。"""
         if record_type is RecordType.ACCOUNT_BALANCE:
+            company_id = self._resolve_company_id(payload)
+            reported_at = _as_datetime(payload["reported_at"])
+
+            existing = self.session.execute(
+                select(AccountBalance).where(
+                    AccountBalance.company_id == company_id,
+                    AccountBalance.reported_at == reported_at,
+                )
+            ).scalar_one_or_none()
+            if existing:
+                if not overwrite:
+                    raise DuplicateRecordError(
+                        record_type,
+                        {"companyId": company_id, "reportedAt": reported_at.isoformat()},
+                    )
+                existing.import_job_id = job.id
+                existing.cash_balance = payload.get("cash_balance", existing.cash_balance)
+                existing.investment_balance = payload.get(
+                    "investment_balance", existing.investment_balance
+                )
+                existing.total_balance = payload.get("total_balance", existing.total_balance)
+                existing.currency = payload.get("currency", existing.currency)
+                existing.notes = payload.get("notes", existing.notes)
+                self._session.flush()
+                return existing.id
+
             record = AccountBalance(
-                company_id=payload["company_id"],
+                company_id=company_id,
                 import_job_id=job.id,
-                reported_at=_as_datetime(payload["reported_at"]),
+                reported_at=reported_at,
                 cash_balance=payload.get("cash_balance", 0),
                 investment_balance=payload.get("investment_balance", 0),
                 total_balance=payload.get("total_balance", 0),
@@ -163,8 +218,9 @@ class ImportJobRepository:
                 CategoryType.REVENUE,
                 fallback_keys=["category", "subcategory"],
             )
+            company_id = self._resolve_company_id(payload)
             record = RevenueRecord(
-                company_id=payload["company_id"],
+                company_id=company_id,
                 import_job_id=job.id,
                 category_id=category_id,
                 month=_as_date(payload["month"]),
@@ -181,8 +237,9 @@ class ImportJobRepository:
                 CategoryType.EXPENSE,
                 fallback_keys=["category"],
             )
+            company_id = self._resolve_company_id(payload)
             record = ExpenseRecord(
-                company_id=payload["company_id"],
+                company_id=company_id,
                 import_job_id=job.id,
                 category_id=category_id,
                 month=_as_date(payload["month"]),
@@ -198,8 +255,9 @@ class ImportJobRepository:
                 CategoryType.FORECAST,
                 fallback_keys=["category"],
             )
+            company_id = self._resolve_company_id(payload)
             record = IncomeForecast(
-                company_id=payload["company_id"],
+                company_id=company_id,
                 import_job_id=job.id,
                 category_id=category_id,
                 cash_in_date=_as_date(payload["cash_in_date"]),
@@ -218,6 +276,26 @@ class ImportJobRepository:
         self._session.add(record)
         self._session.flush()
         return record.id
+
+    def _resolve_company_id(self, payload: Dict[str, Any]) -> str:
+        raw_id = str(payload.get("company_id") or payload.get("companyId") or "").strip()
+        if raw_id:
+            payload["company_id"] = raw_id
+            return raw_id
+
+        placeholder = self._session.get(Company, self._placeholder_company_id)
+        if placeholder is None:
+            placeholder = Company(
+                id=self._placeholder_company_id,
+                name="未指定公司",
+                display_name="未指定公司",
+                currency="CNY",
+            )
+            self._session.add(placeholder)
+            self._session.flush()
+
+        payload["company_id"] = placeholder.id
+        return placeholder.id
 
     def _ensure_category(
         self,

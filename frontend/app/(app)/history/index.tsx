@@ -20,12 +20,17 @@ export default function HistoryScreen() {
             <Text style={styles.title}>历史记录</Text>
             <Text style={styles.subtitle}>查看最近提交的对话与解析结果</Text>
           </View>
-          <Link href="/(app)/ai-chat" style={styles.link}>
-            数据录入
-          </Link>
-          <Link href="/(app)/analysis" style={styles.link}>
-            查询分析
-          </Link>
+          <View style={styles.links}>
+            <Link href="/(app)/dashboard" style={styles.link}>
+              财务看板
+            </Link>
+            <Link href="/(app)/ai-chat" style={styles.link}>
+              数据录入
+            </Link>
+            <Link href="/(app)/analysis" style={styles.link}>
+              查询分析
+            </Link>
+          </View>
         </View>
 
         {!hasData && <Text style={styles.placeholder}>暂无历史记录，先去和 AI 聊天吧。</Text>}
@@ -105,6 +110,10 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 14,
     marginTop: 4,
+  },
+  links: {
+    flexDirection: 'row',
+    gap: 12,
   },
   link: {
     color: '#60A5FA',

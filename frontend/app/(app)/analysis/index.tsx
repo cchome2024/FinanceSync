@@ -72,9 +72,14 @@ export default function AnalysisChatScreen() {
             <Text style={styles.title}>查询分析助手</Text>
             <Text style={styles.subtitle}>提出自然语言问题，获取财务洞察与提示。</Text>
           </View>
-          <Link href="/(app)/ai-chat" style={styles.historyLink}>
-            数据录入
-          </Link>
+          <View style={styles.links}>
+            <Link href="/(app)/dashboard" style={styles.historyLink}>
+              财务看板
+            </Link>
+            <Link href="/(app)/ai-chat" style={styles.historyLink}>
+              数据录入
+            </Link>
+          </View>
         </View>
 
         <ScrollView style={styles.messageContainer}>
@@ -134,6 +139,10 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 14,
     marginTop: 4,
+  },
+  links: {
+    flexDirection: 'row',
+    gap: 12,
   },
   historyLink: {
     color: '#60A5FA',

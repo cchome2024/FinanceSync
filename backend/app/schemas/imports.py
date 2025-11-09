@@ -65,6 +65,7 @@ class ConfirmationAction(BaseModel):
     operation: ConfirmationOperation
     payload: Optional[Dict[str, Any]] = None
     comment: Optional[str] = None
+    overwrite: bool = False
 
 
 class ConfirmationPayload(BaseModel):

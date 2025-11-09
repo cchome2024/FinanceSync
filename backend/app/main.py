@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import imports, imports_confirm
+from app.api.v1 import imports, imports_confirm, nlq, overview
 
 
 def create_app() -> FastAPI:
@@ -19,6 +19,8 @@ def create_app() -> FastAPI:
 
     app.include_router(imports.router)
     app.include_router(imports_confirm.router)
+    app.include_router(overview.router)
+    app.include_router(nlq.router)
 
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:

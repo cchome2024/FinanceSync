@@ -22,23 +22,26 @@ type FinanceState = {
   importPreview: ImportPreviewRecord[]
   importLoading: boolean
   analysisLoading: boolean
+  currentJobId: string | null
   setImportLoading: (value: boolean) => void
   setAnalysisLoading: (value: boolean) => void
   addImportMessage: (message: ChatMessage) => void
   addAnalysisMessage: (message: ChatMessage) => void
   setImportPreview: (records: ImportPreviewRecord[]) => void
+  setCurrentJobId: (jobId: string | null) => void
   reset: () => void
 }
 
 const initialState: Pick<
   FinanceState,
-  'importChat' | 'analysisChat' | 'importPreview' | 'importLoading' | 'analysisLoading'
+  'importChat' | 'analysisChat' | 'importPreview' | 'importLoading' | 'analysisLoading' | 'currentJobId'
 > = {
   importChat: [],
   analysisChat: [],
   importPreview: [],
   importLoading: false,
   analysisLoading: false,
+  currentJobId: null,
 }
 
 export const useFinanceStore = create<FinanceState>()(
@@ -56,6 +59,7 @@ export const useFinanceStore = create<FinanceState>()(
           analysisChat: [...state.analysisChat, message],
         })),
       setImportPreview: (records) => set({ importPreview: records }),
+      setCurrentJobId: (jobId) => set({ currentJobId: jobId }),
       reset: () => set(initialState),
     }),
     {

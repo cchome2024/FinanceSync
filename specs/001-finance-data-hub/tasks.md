@@ -87,16 +87,16 @@
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T025 [US2] 编写财务看板聚合集成测试 `backend/tests/integration/test_financial_overview.py`
+- [x] T025 [US2] 编写财务看板聚合集成测试 `backend/tests/integration/test_financial_overview.py`
 
 ### Implementation for User Story 2
 
-- [ ] T026 [P] [US2] 实现财务统计服务（缓存最新快照） `backend/app/services/financial_overview.py`
-- [ ] T027 [US2] 构建 `/api/v1/financial/overview` API 与权限校验 `backend/app/api/v1/overview.py`
+- [x] T026 [P] [US2] 实现财务统计服务（缓存最新快照） `backend/app/services/financial_overview.py`
+- [x] T027 [US2] 构建 `/api/v1/financial/overview` API 与权限校验 `backend/app/api/v1/overview.py`
 - [ ] T028 [P] [US2] 开发报表导出服务（CSV + PDF） `backend/app/services/report_exporter.py`
 - [ ] T029 [US2] 集成导出接口 `backend/app/api/v1/reports.py`
-- [ ] T030 [P] [US2] 实现看板页面与筛选控件 `frontend/app/(app)/dashboard/index.tsx`
-- [ ] T031 [P] [US2] 构建复用型图表组件 `frontend/components/charts/FinancialTrends.tsx`
+- [x] T030 [P] [US2] 实现看板页面与筛选控件 `frontend/app/(app)/dashboard/index.tsx`
+- [x] T031 [P] [US2] 构建复用型图表组件 `frontend/components/charts/FinancialTrends.tsx`
 - [ ] T032 [US2] 在看板中接入导出与历史快照展示 `frontend/app/(app)/dashboard/export.tsx`
 
 **Checkpoint**: 管理层可在前端查看最新与历史数据，并成功导出符合筛选条件的报表。

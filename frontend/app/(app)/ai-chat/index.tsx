@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,6 +13,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
+import { ImportPreview } from '@/components/imports/ImportPreview'
 import { apiClient } from '@/src/services/apiClient'
 import { useFinanceStore } from '@/src/state/financeStore'
 
@@ -27,6 +29,11 @@ type ParseJobResponse = {
   status: string
   preview: CandidateRecord[]
   rawResponse?: unknown
+}
+
+type ConfirmJobResponse = {
+  approvedCount: number
+  rejectedCount: number
 }
 
 const generateId = () => Math.random().toString(36).slice(2)
@@ -51,9 +58,18 @@ const formatRecord = (record: CandidateRecord, index: number) => {
 export default function AIChatScreen() {
   const [messageInput, setMessageInput] = useState('')
   const [companyId, setCompanyId] = useState('')
+  const [isConfirming, setIsConfirming] = useState(false)
 
-  const { importChat, importPreview, importLoading, addImportMessage, setImportPreview, setImportLoading } =
-    useFinanceStore()
+  const {
+    importChat,
+    importPreview,
+    importLoading,
+    currentJobId,
+    addImportMessage,
+    setImportPreview,
+    setImportLoading,
+    setCurrentJobId,
+  } = useFinanceStore()
 
   const handleSend = useCallback(async () => {
     if (!messageInput.trim()) {
@@ -80,7 +96,15 @@ export default function AIChatScreen() {
 
       const response = await apiClient.post<ParseJobResponse>('/api/v1/parse/upload', formData)
       console.log('[IMPORT CHAT] response', response)
-      setImportPreview([])
+      setCurrentJobId(response.jobId)
+      const previewRecords = response.preview.map((record, index) => ({
+        id: `${response.jobId}-${index}`,
+        recordType: record.recordType,
+        payload: record.payload,
+        confidence: record.confidence,
+        warnings: record.warnings ?? [],
+      }))
+      setImportPreview(previewRecords)
 
       addImportMessage({
         id: generateId(),
@@ -113,7 +137,99 @@ export default function AIChatScreen() {
     } finally {
       setImportLoading(false)
     }
-  }, [messageInput, addImportMessage, setImportPreview, companyId, setImportLoading])
+  }, [messageInput, addImportMessage, setImportPreview, companyId, setImportLoading, setCurrentJobId])
+
+  const executeConfirm = useCallback(
+    async (forceOverwrite = false) => {
+      if (!currentJobId) {
+        return
+      }
+
+      try {
+        setIsConfirming(true)
+        const payload = {
+          actions: importPreview.map((record) => ({
+            recordType: record.recordType,
+            operation: 'approve' as const,
+            payload: record.payload,
+            overwrite: forceOverwrite,
+          })),
+        }
+        const result = await apiClient.post<ConfirmJobResponse>(
+          `/api/v1/import-jobs/${currentJobId}/confirm`,
+          payload
+        )
+
+        addImportMessage({
+          id: generateId(),
+          role: 'assistant',
+          content: `已确认入库 ${result.approvedCount} 条记录，拒绝 ${result.rejectedCount} 条。`,
+          createdAt: new Date().toISOString(),
+        })
+        setImportPreview([])
+        setCurrentJobId(null)
+      } catch (error) {
+        const httpError = error as Error & { status?: number; body?: string }
+        if (httpError?.status === 409) {
+          let detail: { conflict?: Record<string, unknown>; message?: string } | undefined
+          try {
+            detail = httpError.body ? JSON.parse(httpError.body) : undefined
+          } catch {
+            // ignore
+          }
+          const conflict = detail?.conflict ?? {}
+          const companyName = (conflict.companyId as string | undefined) || '该公司'
+          const reportedAt = conflict.reportedAt as string | undefined
+          const description = reportedAt ? `${companyName} ${reportedAt}` : companyName
+          const promptMessage = `${description} 已存在记录，是否覆盖？`
+
+          const triggerOverwrite = () => {
+            setTimeout(() => {
+              void executeConfirm(true)
+            }, 0)
+          }
+
+          if (Platform.OS === 'web') {
+            if (window.confirm(promptMessage)) {
+              triggerOverwrite()
+            }
+          } else {
+            Alert.alert('检测到重复记录', promptMessage, [
+              { text: '取消', style: 'cancel' },
+              { text: '覆盖', onPress: triggerOverwrite },
+            ])
+          }
+          return
+        }
+
+        const fallback =
+          (httpError?.body && httpError.body.toString()) ||
+          (error instanceof Error ? error.message : '未知错误')
+        Alert.alert('确认失败', fallback)
+      } finally {
+        setIsConfirming(false)
+      }
+    },
+    [addImportMessage, currentJobId, importPreview, setCurrentJobId, setImportPreview]
+  )
+
+  const handleConfirm = useCallback(() => {
+    if (!currentJobId || importPreview.length === 0 || isConfirming) {
+      return
+    }
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('确认将当前候选记录写入数据库吗？')) {
+        void executeConfirm(false)
+      }
+      return
+    }
+
+    Alert.alert('确认入库', '确认将当前候选记录写入数据库吗？', [
+      { text: '取消', style: 'cancel' },
+      { text: '确认', onPress: () => void executeConfirm(false) },
+    ])
+  }, [currentJobId, importPreview, isConfirming, executeConfirm])
 
   const messages = useMemo(() => importChat.slice(-20), [importChat])
 
@@ -125,12 +241,17 @@ export default function AIChatScreen() {
             <Text style={styles.title}>FinanceSync 助手</Text>
             <Text style={styles.subtitle}>粘贴文本或说明需求，AI 帮你解析财务数据。</Text>
           </View>
-          <Link href="/(app)/history" style={styles.historyLink}>
-            历史记录
-          </Link>
-          <Link href="/(app)/analysis" style={styles.historyLink}>
-            查询分析
-          </Link>
+          <View style={styles.links}>
+            <Link href="/(app)/dashboard" style={styles.historyLink}>
+              财务看板
+            </Link>
+            <Link href="/(app)/analysis" style={styles.historyLink}>
+              查询分析
+            </Link>
+            <Link href="/(app)/history" style={styles.historyLink}>
+              历史记录
+            </Link>
+          </View>
         </View>
 
         <ScrollView style={styles.messageContainer}>
@@ -145,6 +266,17 @@ export default function AIChatScreen() {
             </View>
           ))}
         </ScrollView>
+
+        <ImportPreview records={importPreview} />
+        {importPreview.length > 0 && (
+          <TouchableOpacity
+            style={[styles.confirmButton, (isConfirming || importLoading) && styles.confirmButtonDisabled]}
+            onPress={handleConfirm}
+            disabled={isConfirming || importLoading}
+          >
+            {isConfirming ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.confirmButtonText}>确认入库</Text>}
+          </TouchableOpacity>
+        )}
 
         <View style={styles.form}>
           <TextInput
@@ -198,6 +330,10 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 14,
     marginTop: 4,
+  },
+  links: {
+    flexDirection: 'row',
+    gap: 12,
   },
   historyLink: {
     color: '#60A5FA',
@@ -269,6 +405,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   sendButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  confirmButton: {
+    backgroundColor: '#22C55E',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  confirmButtonDisabled: {
+    opacity: 0.7,
+  },
+  confirmButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
