@@ -16,7 +16,7 @@ from app import db
 from app.api.deps import get_ai_parser, get_import_job_repository, get_storage_adapter
 from app.main import create_app
 from app.models.base import Base
-from app.models.financial import Company, RevenueDetail
+from app.models.financial import Company, RevenueDetail, IncomeForecast
 from app.repositories.import_jobs import ImportJobRepository
 from app.schemas.imports import CandidateRecord, RecordType
 
@@ -37,23 +37,30 @@ class FakeParser:
     def __init__(self, occurred_on: str, amount: float) -> None:
         self._occurred_on = occurred_on
         self._amount = amount
+        self._custom_records: list[CandidateRecord] | None = None
+
+    def set_custom_records(self, records: list[CandidateRecord] | None) -> None:
+        self._custom_records = records
 
     async def parse_prompt(self, prompt: str, attachments: Iterable[bytes]) -> tuple[list[CandidateRecord], dict]:
-        records = [
-            CandidateRecord(
-                record_type=RecordType.REVENUE,
-                payload={
-                    "occurred_on": self._occurred_on,
-                    "category_path": ["主营业务收入", "产品销售"],
-                    "category": "产品销售",
-                    "description": "测试收入",
-                    "account_name": "基本户",
-                    "amount": self._amount,
-                    "currency": "CNY",
-                },
-                confidence=0.88,
-            )
-        ]
+        if self._custom_records is not None:
+            records = self._custom_records
+        else:
+            records = [
+                CandidateRecord(
+                    record_type=RecordType.REVENUE,
+                    payload={
+                        "occurred_on": self._occurred_on,
+                        "category_path": ["主营业务收入", "产品销售"],
+                        "category": "产品销售",
+                        "description": "测试收入",
+                        "account_name": "基本户",
+                        "amount": self._amount,
+                        "currency": "CNY",
+                    },
+                    confidence=0.88,
+                )
+            ]
         return records, {"records": [r.model_dump(mode="json", by_alias=True) for r in records]}
 
 
@@ -68,7 +75,7 @@ def client_fixture(tmp_path) -> TestClient:
     app.state.fake_parser = parser
 
     async def override_parser() -> FakeParser:
-        return parser
+        return app.state.fake_parser
 
     def override_storage() -> MemoryStorage:
         return MemoryStorage()
@@ -232,3 +239,130 @@ def test_confirm_revenue_requires_overwrite(client: TestClient) -> None:
         assert len(records) == 1
         assert float(records[0].amount) == 999999.0
 
+
+def test_income_forecast_full_replace(client: TestClient) -> None:
+    company_id = str(uuid.uuid4())
+    with db.session_scope() as session:
+        session.add(
+            Company(
+                id=company_id,
+                name="Forecast Co",
+                display_name="预测公司",
+                currency="CNY",
+            )
+        )
+
+    parser: FakeParser = client.app.state.fake_parser
+    first_records = [
+        CandidateRecord(
+            record_type=RecordType.REVENUE_FORECAST,
+            payload={
+                "company_id": company_id,
+                "cash_in_date": "2025-06-15",
+                "category_path": ["预测收入", "咨询服务"],
+                "category": "咨询服务",
+                "description": "预测款项A",
+                "account_name": "预测账号",
+                "expected_amount": 500000,
+                "currency": "CNY",
+                "certainty": "certain",
+            },
+            confidence=0.75,
+        ),
+        CandidateRecord(
+            record_type=RecordType.REVENUE_FORECAST,
+            payload={
+                "company_id": company_id,
+                "cash_in_date": "2025-07-20",
+                "category_path": ["预测收入", "咨询服务"],
+                "category": "咨询服务",
+                "description": "预测款项B",
+                "account_name": "预测账号",
+                "expected_amount": 200000,
+                "currency": "CNY",
+                "certainty": "uncertain",
+            },
+            confidence=0.6,
+        ),
+    ]
+    parser.set_custom_records(first_records)
+
+    response = client.post(
+        "/api/v1/parse/upload",
+        data={"prompt": "预测收入", "company_id": company_id},
+    )
+    assert response.status_code == 202
+    job_payload = response.json()
+    job_id = job_payload["jobId"]
+
+    confirm_actions = [
+        {
+            "recordType": record["recordType"],
+            "operation": "approve",
+            "payload": record["payload"],
+        }
+        for record in job_payload["preview"]
+    ]
+    confirm_response = client.post(
+        f"/api/v1/import-jobs/{job_id}/confirm",
+        json={"actions": confirm_actions},
+    )
+    assert confirm_response.status_code == 200
+
+    with db.session_scope() as session:
+        saved = (
+            session.query(IncomeForecast)
+            .filter(IncomeForecast.company_id == company_id)
+            .order_by(IncomeForecast.cash_in_date)
+            .all()
+        )
+        assert len(saved) == 2
+        assert saved[0].description == "预测款项A"
+        assert float(saved[1].expected_amount) == 200000
+
+    second_records = [
+        CandidateRecord(
+            record_type=RecordType.REVENUE_FORECAST,
+            payload={
+                "company_id": company_id,
+                "cash_in_date": "2025-08-10",
+                "category_path": ["预测收入", "咨询服务"],
+                "category": "咨询服务",
+                "description": "预测款项C",
+                "account_name": "预测账号",
+                "expected_amount": 1000000,
+                "currency": "CNY",
+            },
+        )
+    ]
+    parser.set_custom_records(second_records)
+
+    response2 = client.post(
+        "/api/v1/parse/upload",
+        data={"prompt": "预测收入更新", "company_id": company_id},
+    )
+    assert response2.status_code == 202
+    job_payload2 = response2.json()
+    job_id2 = job_payload2["jobId"]
+
+    confirm_response2 = client.post(
+        f"/api/v1/import-jobs/{job_id2}/confirm",
+        json={
+            "actions": [
+                {
+                    "recordType": job_payload2["preview"][0]["recordType"],
+                    "operation": "approve",
+                    "payload": job_payload2["preview"][0]["payload"],
+                }
+            ]
+        },
+    )
+    assert confirm_response2.status_code == 200
+
+    with db.session_scope() as session:
+        saved_after = session.query(IncomeForecast).filter_by(company_id=company_id).all()
+        assert len(saved_after) == 1
+        assert saved_after[0].description == "预测款项C"
+        assert float(saved_after[0].expected_amount) == 1000000
+
+    parser.set_custom_records(None)

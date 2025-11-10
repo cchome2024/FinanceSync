@@ -41,6 +41,7 @@ class ImportJobRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
         self._category_service = FinanceCategoryService(session)
+        self._forecast_cleared_companies: set[str] = set()
 
     @property
     def session(self) -> Session:
@@ -262,8 +263,6 @@ class ImportJobRepository:
                 stmt = stmt.where(RevenueDetail.account_name == account_name)
             else:
                 stmt = stmt.where(RevenueDetail.account_name.is_(None))
-            stmt = stmt.where(RevenueDetail.amount == amount_value)
-
             existing_detail = self.session.execute(stmt).scalar_one_or_none()
             conflict_info = {
                 "companyId": company_id,
@@ -327,23 +326,87 @@ class ImportJobRepository:
                 confidence=payload.get("confidence"),
                 notes=payload.get("notes"),
             )
-        elif record_type is RecordType.INCOME_FORECAST:
+        elif record_type in (RecordType.INCOME_FORECAST, RecordType.REVENUE_FORECAST):
             category_id = self._ensure_category(
                 payload,
                 CategoryType.FORECAST,
-                fallback_keys=["category"],
+                fallback_keys=[
+                    "category",
+                    "subcategory",
+                    "category_level1",
+                    "category_level2",
+                    "categoryLevel1",
+                    "categoryLevel2",
+                ],
             )
             company_id = self._resolve_company_id(payload)
+            self._ensure_forecast_reset(company_id)
+
+            raw_date = (
+                payload.get("cash_in_date")
+                or payload.get("cashInDate")
+                or payload.get("occurred_on")
+                or payload.get("occurredOn")
+                or payload.get("forecast_date")
+                or payload.get("forecastDate")
+            )
+            if not raw_date:
+                raise ValueError("Income forecast missing date field (cash_in_date/occurred_on/forecast_date)")
+            cash_in_date = _as_date(str(raw_date))
+            payload["cash_in_date"] = cash_in_date.isoformat()
+
+            amount_raw = payload.get("expected_amount")
+            if amount_raw is None:
+                amount_raw = payload.get("amount")
+            if amount_raw is None:
+                raise ValueError("Income forecast missing amount field")
+            amount_value = Decimal(str(amount_raw))
+            payload["expected_amount"] = float(amount_value)
+
+            description = (
+                payload.get("description")
+                or payload.get("item")
+                or payload.get("item_name")
+                or ""
+            ).strip() or None
+            account_name = (
+                payload.get("account_name")
+                or payload.get("account")
+                or payload.get("accountName")
+                or ""
+            ).strip() or None
+            category_text = payload.get("category_path_text")
+            if not category_text:
+                category_text = payload.get("category_path")
+            category_label = payload.get("category")
+            subcategory_label = payload.get("subcategory")
+            if isinstance(category_text, (list, tuple)):
+                category_path_text = "/".join(
+                    str(part).strip() for part in category_text if str(part).strip()
+                )
+            elif isinstance(category_text, str):
+                category_path_text = category_text
+            else:
+                category_path_text = None
+
+            certainty_value = payload.get("certainty") or Certainty.CERTAIN.value
+            record_certainty = Certainty(certainty_value)
+
             record = IncomeForecast(
                 company_id=company_id,
                 import_job_id=job.id,
                 category_id=category_id,
-                cash_in_date=_as_date(payload["cash_in_date"]),
+                cash_in_date=cash_in_date,
                 product_line=payload.get("product_line"),
                 product_name=payload.get("product_name"),
-                certainty=Certainty(payload.get("certainty", Certainty.CERTAIN.value)),
+                certainty=record_certainty,
                 category=payload.get("category"),
-                expected_amount=payload.get("expected_amount", 0),
+                category_path_text=category_path_text,
+                category_label=category_label,
+                subcategory_label=subcategory_label,
+                description=description,
+                account_name=account_name,
+                expected_amount=amount_value,
                 currency=payload.get("currency", "CNY"),
                 confidence=payload.get("confidence"),
                 notes=payload.get("notes"),
@@ -400,6 +463,14 @@ class ImportJobRepository:
             payload["category_path_text"] = "/".join(names)
             return category.id
         return None
+
+    def _ensure_forecast_reset(self, company_id: str) -> None:
+        if company_id in self._forecast_cleared_companies:
+            return
+        self.session.query(IncomeForecast).filter(IncomeForecast.company_id == company_id).delete(
+            synchronize_session=False
+        )
+        self._forecast_cleared_companies.add(company_id)
 
 
 def _average_confidence(records: Sequence[CandidateRecord]) -> float | None:

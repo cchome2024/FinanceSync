@@ -18,6 +18,7 @@ from app.models.financial import (
     Certainty,
 )
 from app.schemas.overview import (
+    BalanceHistoryItem,
     BalanceSummary,
     CompanyOverview,
     FinancialOverview,
@@ -286,6 +287,7 @@ class FinancialOverviewService:
         year: Optional[int] = None,
         company_id: Optional[str] = None,
         max_level: Optional[int] = None,
+        include_forecast: bool = False,
     ) -> RevenueSummaryResponse:
         if year is None:
             year = datetime.now(UTC).year
@@ -300,7 +302,18 @@ class FinancialOverviewService:
 
         results = self._session.execute(stmt).all()
 
-        if not results:
+        forecast_results: List[Tuple[IncomeForecast, FinanceCategory | None]] = []
+        if include_forecast:
+            forecast_stmt = (
+                select(IncomeForecast, FinanceCategory)
+                .outerjoin(FinanceCategory, IncomeForecast.category_ref)
+                .where(func.strftime('%Y', IncomeForecast.cash_in_date) == str(year))
+            )
+            if company_id:
+                forecast_stmt = forecast_stmt.where(IncomeForecast.company_id == company_id)
+            forecast_results = self._session.execute(forecast_stmt).all()
+
+        if not results and not forecast_results:
             return RevenueSummaryResponse(
                 year=year,
                 companyId=company_id,
@@ -310,55 +323,82 @@ class FinancialOverviewService:
 
         if max_level is None or max_level < 1:
             max_level = 2
-        totals_by_path: Dict[Tuple[str, ...], List[float]] = {}
-        totals_sum: Dict[Tuple[str, ...], float] = {}
+
+        path_stats: Dict[Tuple[str, ...], Dict[str, List[float] | float]] = {}
         root_order: List[Tuple[str, ...]] = []
         children_order: Dict[Tuple[str, ...], List[Tuple[str, ...]]] = {}
 
-        def ensure_path(path: Tuple[str, ...]) -> None:
-            if path not in totals_by_path:
-                totals_by_path[path] = [0.0] * 12
-                totals_sum[path] = 0.0
+        def ensure_path(path: Tuple[str, ...]) -> Dict[str, List[float] | float]:
+            if path not in path_stats:
+                path_stats[path] = {
+                    "actual_monthly": [0.0] * 12,
+                    "actual_sum": 0.0,
+                    "forecast_monthly": [0.0] * 12,
+                    "forecast_sum": 0.0,
+                }
+            return path_stats[path]
 
         def add_child(parent: Tuple[str, ...], child: Tuple[str, ...]) -> None:
             children = children_order.setdefault(parent, [])
             if child not in children:
                 children.append(child)
 
+        def iter_paths(category: FinanceCategory | None, path_text: str | None, label: str | None, sublabel: str | None) -> Tuple[str, ...]:
+            if category and category.full_path:
+                segments = [segment for segment in category.full_path.split('/') if segment]
+            elif path_text:
+                segments = [segment for segment in path_text.split('/') if segment]
+            else:
+                segments = [segment for segment in [label, sublabel] if segment]
+            if not segments:
+                segments = ["未分类"]
+            return tuple(segments)
+
+        grand_actual_monthly = [0.0] * 12
+        grand_forecast_monthly = [0.0] * 12
+
         for detail, category in results:
             amount = self._to_float(detail.amount)
             month_idx = detail.occurred_on.month - 1
-
-            if category and category.full_path:
-                path_segments = [segment for segment in category.full_path.split('/') if segment]
-            elif detail.category_path_text:
-                path_segments = [segment for segment in detail.category_path_text.split('/') if segment]
-            else:
-                path_segments = [
-                    segment
-                    for segment in [
-                        detail.category_label,
-                        detail.subcategory_label,
-                    ]
-                    if segment
-                ]
-
-            if not path_segments:
-                path_segments = ["未分类"]
-
-            tuple_path = tuple(path_segments)
+            tuple_path = iter_paths(category, detail.category_path_text, detail.category_label, detail.subcategory_label)
 
             for depth in range(1, len(tuple_path) + 1):
                 subpath = tuple_path[:depth]
-                ensure_path(subpath)
-                totals_by_path[subpath][month_idx] += amount
-                totals_sum[subpath] += amount
+                stats = ensure_path(subpath)
+                stats["actual_monthly"][month_idx] += amount  # type: ignore[index]
+                stats["actual_sum"] += amount  # type: ignore[operator]
 
                 if depth == 1 and subpath not in root_order:
                     root_order.append(subpath)
                 if depth > 1:
                     parent = tuple_path[: depth - 1]
                     add_child(parent, subpath)
+
+            grand_actual_monthly[month_idx] += amount
+
+        for forecast, category in forecast_results:
+            amount = self._to_float(forecast.expected_amount)
+            month_idx = forecast.cash_in_date.month - 1
+            tuple_path = iter_paths(
+                category,
+                forecast.category_path_text,
+                forecast.category_label,
+                forecast.subcategory_label,
+            )
+
+            for depth in range(1, len(tuple_path) + 1):
+                subpath = tuple_path[:depth]
+                stats = ensure_path(subpath)
+                stats["forecast_monthly"][month_idx] += amount  # type: ignore[index]
+                stats["forecast_sum"] += amount  # type: ignore[operator]
+
+                if depth == 1 and subpath not in root_order:
+                    root_order.append(subpath)
+                if depth > 1:
+                    parent = tuple_path[: depth - 1]
+                    add_child(parent, subpath)
+
+            grand_forecast_monthly[month_idx] += amount
 
         def build_node(path: Tuple[str, ...]) -> RevenueSummaryNode:
             level = len(path)
@@ -369,29 +409,47 @@ class FinancialOverviewService:
                     child for child in children_order.get(path, []) if len(child) <= max_level
                 ]
             children = [build_node(child) for child in children_paths]
-            monthly = [round(value, 2) for value in totals_by_path[path]]
-            total_value = round(totals_sum[path], 2)
-            return RevenueSummaryNode(
+
+            stats = ensure_path(path)
+            actual_monthly = [round(value, 2) for value in stats["actual_monthly"]]  # type: ignore[arg-type]
+            actual_total = round(stats["actual_sum"], 2)  # type: ignore[arg-type]
+
+            node_kwargs = dict(
                 label=path[-1],
                 level=level,
-                monthly=monthly,
-                total=total_value,
+                monthly=actual_monthly,
+                total=actual_total,
                 children=children,
             )
 
+            if include_forecast:
+                forecast_monthly = [round(value, 2) for value in stats["forecast_monthly"]]  # type: ignore[arg-type]
+                forecast_total = round(stats["forecast_sum"], 2)  # type: ignore[arg-type]
+                node_kwargs["forecastMonthly"] = forecast_monthly
+                node_kwargs["forecastTotal"] = forecast_total
+
+            return RevenueSummaryNode(**node_kwargs)
+
         nodes = [build_node(path) for path in root_order]
 
-        grand_monthly = [0.0] * 12
-        for path in root_order:
-            for idx, value in enumerate(totals_by_path[path]):
-                grand_monthly[idx] += value
-        grand_totals = [round(value, 2) for value in grand_monthly]
-        grand_total_value = round(sum(grand_monthly), 2)
+        grand_actual = [round(value, 2) for value in grand_actual_monthly]
+        grand_actual_total = round(sum(grand_actual_monthly), 2)
+
+        totals_kwargs = dict(
+            monthly=grand_actual,
+            total=grand_actual_total,
+        )
+
+        if include_forecast:
+            grand_forecast = [round(value, 2) for value in grand_forecast_monthly]
+            grand_forecast_total = round(sum(grand_forecast_monthly), 2)
+            totals_kwargs["forecastMonthly"] = grand_forecast
+            totals_kwargs["forecastTotal"] = grand_forecast_total
 
         return RevenueSummaryResponse(
             year=year,
             companyId=company_id,
-            totals=RevenueSummaryTotals(monthly=grand_totals, total=grand_total_value),
+            totals=RevenueSummaryTotals(**totals_kwargs),
             nodes=nodes,
         )
 

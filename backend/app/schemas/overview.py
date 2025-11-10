@@ -56,11 +56,15 @@ class RevenueSummaryNode(BaseModel):
     monthly: List[float]
     total: float
     children: List['RevenueSummaryNode'] = Field(default_factory=list)
+    forecast_monthly: Optional[List[float]] = Field(default=None, alias="forecastMonthly")
+    forecast_total: Optional[float] = Field(default=None, alias="forecastTotal")
 
 
 class RevenueSummaryTotals(BaseModel):
     monthly: List[float]
     total: float
+    forecast_monthly: Optional[List[float]] = Field(default=None, alias="forecastMonthly")
+    forecast_total: Optional[float] = Field(default=None, alias="forecastTotal")
 
 
 class RevenueSummaryResponse(BaseModel):

@@ -34,9 +34,15 @@ def get_revenue_summary(
     year: Optional[int] = Query(None),
     company_id: Optional[str] = Query(None, alias="companyId"),
     max_level: Optional[int] = Query(2, alias="maxLevel", ge=1, le=6),
+    include_forecast: bool = Query(False, alias="includeForecast"),
     service: FinancialOverviewService = Depends(get_financial_overview_service),
 ) -> RevenueSummaryResponse:
-    return service.get_revenue_summary(year=year, company_id=company_id, max_level=max_level)
+    return service.get_revenue_summary(
+        year=year,
+        company_id=company_id,
+        max_level=max_level,
+        include_forecast=include_forecast,
+    )
 
 
 @router.get(

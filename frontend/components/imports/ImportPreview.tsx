@@ -22,6 +22,7 @@ function getTitle(recordType: ImportPreviewRecord['recordType']): string {
     case 'expense':
       return '支出记录'
     case 'income_forecast':
+    case 'revenue_forecast':
       return '收入预测'
     default:
       return recordType
@@ -48,6 +49,7 @@ const ImportPreviewComponent = ({ records }: Props) => {
     revenue: false,
     expense: false,
     income_forecast: false,
+    revenue_forecast: false,
   })
 
   const toggleType = (type: ImportPreviewRecord['recordType']) => {

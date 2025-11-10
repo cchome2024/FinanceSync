@@ -15,7 +15,17 @@ if str(ROOT_DIR) not in sys.path:
 from app import db
 from app.main import create_app
 from app.models.base import Base
-from app.models.financial import CategoryType, Company, FinanceCategory, RevenueDetail, ImportJob, ImportSource, ImportStatus
+from app.models.financial import (
+    CategoryType,
+    Certainty,
+    Company,
+    FinanceCategory,
+    IncomeForecast,
+    RevenueDetail,
+    ImportJob,
+    ImportSource,
+    ImportStatus,
+)
 
 
 @pytest.fixture(name="client")
@@ -109,6 +119,32 @@ def _seed_data() -> None:
                 ),
             ]
         )
+        session.add_all(
+            [
+                IncomeForecast(
+                    company_id=company.id,
+                    import_job_id=import_job.id,
+                    category_id=child.id,
+                    cash_in_date=date(2024, 4, 15),
+                    certainty=Certainty.CERTAIN,
+                    category="报告服务",
+                    category_path_text="互联网基金服务/报告服务",
+                    expected_amount=150,
+                    currency="CNY",
+                ),
+                IncomeForecast(
+                    company_id=company.id,
+                    import_job_id=import_job.id,
+                    category_id=None,
+                    cash_in_date=date(2024, 5, 20),
+                    certainty=Certainty.UNCERTAIN,
+                    category_label="培训服务",
+                    subcategory_label="合作培训",
+                    expected_amount=80,
+                    currency="CNY",
+                ),
+            ]
+        )
 
 
 def test_revenue_summary_returns_hierarchy(client: TestClient) -> None:
@@ -123,6 +159,8 @@ def test_revenue_summary_returns_hierarchy(client: TestClient) -> None:
     assert payload["totals"]["monthly"][0] == 100.0
     assert payload["totals"]["monthly"][1] == 230.0
     assert payload["totals"]["monthly"][2] == 50.0
+    assert payload["totals"].get("forecastMonthly") in (None, [])
+    assert payload["totals"].get("forecastTotal") in (None, 0)
 
     nodes = payload["nodes"]
     assert len(nodes) == 2
@@ -151,3 +189,28 @@ def test_revenue_summary_returns_hierarchy(client: TestClient) -> None:
     internet_services_full = next(node for node in nodes_full if node["label"] == "互联网基金服务")
     report_full = next(child for child in internet_services_full["children"] if child["label"] == "报告服务")
     assert any(child["label"] == "专项项目" for child in report_full["children"])
+
+
+def test_revenue_summary_with_forecast(client: TestClient) -> None:
+    _seed_data()
+
+    response = client.get(
+        "/api/v1/financial/revenue-summary",
+        params={"year": 2024, "includeForecast": True},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+
+    totals = payload["totals"]
+    assert totals["forecastTotal"] == 230.0
+    assert totals["forecastMonthly"][3] == 150.0
+    assert totals["forecastMonthly"][4] == 80.0
+
+    nodes = payload["nodes"]
+    internet_services = next(node for node in nodes if node["label"] == "互联网基金服务")
+    assert internet_services["forecastTotal"] == 150.0
+    assert internet_services["forecastMonthly"][3] == 150.0
+
+    training = next(node for node in nodes if node["label"] == "培训服务")
+    assert training["forecastTotal"] == 80.0
+    assert training["forecastMonthly"][4] == 80.0

@@ -228,6 +228,17 @@ class ExpenseRecord(Base):
 
 class IncomeForecast(Base):
     __tablename__ = "income_forecasts"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "cash_in_date",
+            "expected_amount",
+            "category_id",
+            "description",
+            "account_name",
+            name="uq_income_forecast_natural_key",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     company_id: Mapped[str] = mapped_column(String(36), ForeignKey("companies.id"), nullable=False)
@@ -238,6 +249,11 @@ class IncomeForecast(Base):
     product_name: Mapped[str | None] = mapped_column(String(64))
     certainty: Mapped[Certainty] = mapped_column(Enum(Certainty), nullable=False)
     category: Mapped[str | None] = mapped_column(String(64))
+    category_path_text: Mapped[str | None] = mapped_column(String(512))
+    category_label: Mapped[str | None] = mapped_column(String(128))
+    subcategory_label: Mapped[str | None] = mapped_column(String(128))
+    description: Mapped[str | None] = mapped_column(String(255))
+    account_name: Mapped[str | None] = mapped_column(String(64))
     expected_amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(8), default="CNY")
     confidence: Mapped[float | None] = mapped_column(Float)

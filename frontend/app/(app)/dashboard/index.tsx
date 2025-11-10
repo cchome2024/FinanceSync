@@ -43,18 +43,26 @@ type RevenueSummaryNode = {
   level: number
   monthly: number[]
   total: number
+  forecastMonthly?: number[]
+  forecastTotal?: number
   children?: RevenueSummaryNode[]
+}
+
+type RevenueSummaryTotals = {
+  monthly: number[]
+  total: number
+  forecastMonthly?: number[]
+  forecastTotal?: number
 }
 
 type RevenueSummaryResponse = {
   year: number
   companyId?: string | null
-  totals: {
-    monthly: number[]
-    total: number
-  }
+  totals: RevenueSummaryTotals
   nodes: RevenueSummaryNode[]
 }
+
+const MAX_REVENUE_LEVEL = 6
 
 export default function DashboardScreen() {
   const [data, setData] = useState<FinancialOverviewResponse | null>(null)
@@ -62,8 +70,9 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(false)
   const [revenueSummary, setRevenueSummary] = useState<RevenueSummaryResponse | null>(null)
   const [revenueYear, setRevenueYear] = useState(new Date().getFullYear())
-  const [revenueLevel, setRevenueLevel] = useState(2)
   const [loadingRevenue, setLoadingRevenue] = useState(false)
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set())
+  const [includeForecast, setIncludeForecast] = useState(false)
 
   const loadOverview = useCallback(async () => {
     setLoading(true)
@@ -86,9 +95,12 @@ export default function DashboardScreen() {
   const loadRevenueSummary = useCallback(async () => {
     setLoadingRevenue(true)
     try {
-      const params: Record<string, string> = { year: String(revenueYear), maxLevel: String(revenueLevel) }
+      const params: Record<string, string> = { year: String(revenueYear), maxLevel: String(MAX_REVENUE_LEVEL) }
       if (companyId) {
         params.companyId = companyId
+      }
+      if (includeForecast) {
+        params.includeForecast = 'true'
       }
       const query = new URLSearchParams(params).toString()
       const response = await apiClient.get<RevenueSummaryResponse>(`/api/v1/financial/revenue-summary?${query}`)
@@ -99,12 +111,40 @@ export default function DashboardScreen() {
     } finally {
       setLoadingRevenue(false)
     }
-  }, [companyId, revenueYear, revenueLevel])
+  }, [companyId, revenueYear, includeForecast])
 
   useEffect(() => {
     loadOverview()
     loadRevenueSummary()
   }, [loadOverview, loadRevenueSummary])
+
+  const makeNodeKey = useCallback((parentKey: string | null, label: string) => {
+    return parentKey ? `${parentKey}>${label}` : label
+  }, [])
+
+  useEffect(() => {
+    if (!revenueSummary) {
+      setExpandedKeys(new Set())
+      return
+    }
+    const initial = new Set<string>()
+    revenueSummary.nodes.forEach((node) => {
+      initial.add(makeNodeKey(null, node.label))
+    })
+    setExpandedKeys(initial)
+  }, [revenueSummary, makeNodeKey])
+
+  const toggleNode = useCallback((key: string) => {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }, [])
 
 useFocusEffect(
   useCallback(() => {
@@ -130,22 +170,45 @@ useFocusEffect(
       return []
     }
 
-    const rows: Array<{ key: string; label: string; depth: number; monthly: number[]; total: number }> = []
+    type Row = {
+      key: string
+      label: string
+      depth: number
+      monthly: number[]
+      total: number
+      forecastMonthly?: number[]
+      forecastTotal?: number
+      hasChildren: boolean
+      expanded: boolean
+    }
 
-    const traverse = (nodes: RevenueSummaryNode[], parentKey = '') => {
-      nodes.forEach((node, index) => {
-        const key = `${parentKey}${node.label}-${index}`
-        const depth = Math.max(0, node.level - 1)
-        rows.push({ key, label: node.label, depth, monthly: node.monthly, total: node.total })
-        if (node.children && node.children.length > 0) {
-          traverse(node.children, `${key}>`)
+    const rows: Row[] = []
+
+    const traverse = (nodes: RevenueSummaryNode[], parentKey: string | null, depth: number) => {
+      nodes.forEach((node) => {
+        const key = makeNodeKey(parentKey, node.label)
+        const hasChildren = !!(node.children && node.children.length > 0)
+        const expanded = expandedKeys.has(key)
+        rows.push({
+          key,
+          label: node.label,
+          depth,
+          monthly: node.monthly,
+          total: node.total,
+          forecastMonthly: node.forecastMonthly,
+          forecastTotal: node.forecastTotal,
+          hasChildren,
+          expanded,
+        })
+        if (hasChildren && expanded) {
+          traverse(node.children ?? [], key, depth + 1)
         }
       })
     }
 
-    traverse(revenueSummary.nodes)
+    traverse(revenueSummary.nodes, null, 0)
     return rows
-  }, [revenueSummary])
+  }, [revenueSummary, expandedKeys, makeNodeKey])
 
   const formatAmount = useCallback((value: number) => {
     if (value === 0) {
@@ -156,6 +219,17 @@ useFocusEffect(
       maximumFractionDigits: 2,
     })
   }, [])
+
+  const formatForecastAmount = useCallback(
+    (value: number) => {
+      const formatted = formatAmount(value)
+      if (!formatted) {
+        return ''
+      }
+      return `+${formatted}`
+    },
+    [formatAmount],
+  )
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -256,20 +330,29 @@ useFocusEffect(
                     </TouchableOpacity>
                   ))}
                 </View>
-                <View style={styles.levelSelector}>
-                  {[1, 2, 3].map((level) => (
-                    <TouchableOpacity
-                      key={level}
-                      style={[styles.levelChip, revenueLevel === level && styles.levelChipActive]}
-                      onPress={() => setRevenueLevel(level)}
-                      disabled={loadingRevenue}
-                    >
-                      <Text style={revenueLevel === level ? styles.levelChipTextActive : styles.levelChipText}>{`${level} 级`}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+                <TouchableOpacity
+                  style={[styles.forecastToggle, includeForecast && styles.forecastToggleActive]}
+                  onPress={() => setIncludeForecast((prev) => !prev)}
+                  disabled={loadingRevenue}
+                >
+                  <Text style={includeForecast ? styles.forecastToggleTextActive : styles.forecastToggleText}>
+                    {includeForecast ? '已包含预测' : '包含预测'}
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
+            {includeForecast && (
+              <View style={styles.legendRow}>
+                <View style={styles.legendItem}>
+                  <View style={[styles.legendDot, styles.legendDotActual]} />
+                  <Text style={styles.legendText}>实际收入</Text>
+                </View>
+                <View style={styles.legendItem}>
+                  <View style={[styles.legendDot, styles.legendDotForecast]} />
+                  <Text style={styles.legendText}>预测收入</Text>
+                </View>
+              </View>
+            )}
             {loadingRevenue && (
               <View style={styles.loadingContainer}>
                 <ActivityIndicator color="#60A5FA" />
@@ -291,25 +374,87 @@ useFocusEffect(
                   </View>
                   {revenueRows.map((row) => (
                     <View key={row.key} style={styles.tableRow}>
-                      <Text style={[styles.tableCell, styles.labelColumn, { paddingLeft: 16 + row.depth * 16 }]}>
-                        {row.label}
-                      </Text>
-                      {row.monthly.map((value, idx) => (
-                        <Text key={`${row.key}-m-${idx}`} style={styles.tableCell}>
-                          {formatAmount(value)}
-                        </Text>
-                      ))}
-                      <Text style={[styles.tableCell, styles.totalColumn]}>{formatAmount(row.total)}</Text>
+                      <View style={[styles.tableCell, styles.labelColumn]}>
+                        <View style={[styles.treeLabelContainer, { paddingLeft: 12 + row.depth * 16 }]}>
+                          {row.hasChildren ? (
+                            <TouchableOpacity
+                              onPress={() => toggleNode(row.key)}
+                              style={[
+                                styles.collapseButton,
+                                row.expanded && styles.collapseButtonExpanded,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.collapseButtonText,
+                                  row.expanded && styles.collapseButtonTextExpanded,
+                                ]}
+                              >
+                                {row.expanded ? '−' : '+'}
+                              </Text>
+                            </TouchableOpacity>
+                          ) : (
+                            <View style={styles.collapsePlaceholder} />
+                          )}
+                          <Text style={styles.labelText}>{row.label}</Text>
+                        </View>
+                      </View>
+                      {row.monthly.map((value, idx) => {
+                        const forecastValue = row.forecastMonthly?.[idx] ?? 0
+                        const actualText = formatAmount(value)
+                        const forecastText = includeForecast ? formatForecastAmount(forecastValue) : ''
+                        const showForecast = includeForecast && !!forecastText
+                        return (
+                          <Text key={`${row.key}-m-${idx}`} style={styles.tableCell}>
+                            {actualText || (showForecast ? ' ' : '')}
+                            {showForecast ? '\n' : ''}
+                            {showForecast ? <Text style={styles.forecastValue}>{forecastText}</Text> : null}
+                          </Text>
+                        )
+                      })}
+                      {(() => {
+                        const forecastValue = row.forecastTotal ?? 0
+                        const actualText = formatAmount(row.total)
+                        const forecastText = includeForecast ? formatForecastAmount(forecastValue) : ''
+                        const showForecast = includeForecast && !!forecastText
+                        return (
+                          <Text style={[styles.tableCell, styles.totalColumn]}>
+                            {actualText || (showForecast ? ' ' : '')}
+                            {showForecast ? '\n' : ''}
+                            {showForecast ? <Text style={styles.forecastValue}>{forecastText}</Text> : null}
+                          </Text>
+                        )
+                      })()}
                     </View>
                   ))}
                   <View style={[styles.tableRow, styles.tableTotalRow]}>
                     <Text style={[styles.tableCell, styles.labelColumn]}>合计</Text>
-                    {revenueSummary.totals.monthly.map((value, idx) => (
-                      <Text key={`total-${idx}`} style={styles.tableCell}>
-                        {formatAmount(value)}
-                      </Text>
-                    ))}
-                    <Text style={[styles.tableCell, styles.totalColumn]}>{formatAmount(revenueSummary.totals.total)}</Text>
+                    {revenueSummary.totals.monthly.map((value, idx) => {
+                      const forecastValue = revenueSummary.totals.forecastMonthly?.[idx] ?? 0
+                      const actualText = formatAmount(value)
+                      const forecastText = includeForecast ? formatForecastAmount(forecastValue) : ''
+                      const showForecast = includeForecast && !!forecastText
+                      return (
+                        <Text key={`total-${idx}`} style={styles.tableCell}>
+                          {actualText || (showForecast ? ' ' : '')}
+                          {showForecast ? '\n' : ''}
+                          {showForecast ? <Text style={styles.forecastValue}>{forecastText}</Text> : null}
+                        </Text>
+                      )
+                    })}
+                    {(() => {
+                      const forecastValue = revenueSummary.totals.forecastTotal ?? 0
+                      const actualText = formatAmount(revenueSummary.totals.total)
+                      const forecastText = includeForecast ? formatForecastAmount(forecastValue) : ''
+                      const showForecast = includeForecast && !!forecastText
+                      return (
+                        <Text style={[styles.tableCell, styles.totalColumn]}>
+                          {actualText || (showForecast ? ' ' : '')}
+                          {showForecast ? '\n' : ''}
+                          {showForecast ? <Text style={styles.forecastValue}>{forecastText}</Text> : null}
+                        </Text>
+                      )
+                    })()}
                   </View>
                 </View>
               </ScrollView>
@@ -484,28 +629,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
-  levelSelector: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  levelChip: {
+  forecastToggle: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.4)',
-    paddingHorizontal: 10,
+    borderColor: 'rgba(250, 204, 21, 0.4)',
+    paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: 'rgba(148, 163, 184, 0.12)',
   },
-  levelChipActive: {
-    backgroundColor: '#38BDF8',
-    borderColor: '#38BDF8',
+  forecastToggleActive: {
+    backgroundColor: 'rgba(250, 204, 21, 0.2)',
+    borderColor: '#FACC15',
   },
-  levelChipText: {
-    color: '#94A3B8',
+  forecastToggleText: {
+    color: '#FACC15',
     fontSize: 12,
   },
-  levelChipTextActive: {
-    color: '#FFFFFF',
+  forecastToggleTextActive: {
+    color: '#FDE68A',
     fontSize: 12,
     fontWeight: '600',
   },
@@ -518,6 +658,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 6,
     paddingLeft: 12,
+  },
+  legendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    paddingHorizontal: 12,
+    marginBottom: 6,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+  },
+  legendDotActual: {
+    backgroundColor: '#60A5FA',
+  },
+  legendDotForecast: {
+    backgroundColor: '#FACC15',
+  },
+  legendText: {
+    color: '#CBD5F5',
+    fontSize: 12,
   },
   tableRow: {
     flexDirection: 'row',
@@ -551,8 +718,49 @@ const styles = StyleSheet.create({
     minWidth: 180,
     textAlign: 'left',
   },
+  treeLabelContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  collapseButton: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#38BDF8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+    backgroundColor: 'transparent',
+  },
+  collapseButtonExpanded: {
+    backgroundColor: '#38BDF8',
+  },
+  collapseButtonText: {
+    color: '#38BDF8',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 12,
+  },
+  collapseButtonTextExpanded: {
+    color: '#0F172A',
+  },
+  collapsePlaceholder: {
+    width: 22,
+    height: 22,
+    marginRight: 8,
+  },
+  labelText: {
+    color: '#F8FAFC',
+    fontSize: 13,
+  },
   totalColumn: {
     minWidth: 96,
+  },
+  forecastValue: {
+    color: '#FACC15',
+    fontSize: 12,
   },
 })
 
