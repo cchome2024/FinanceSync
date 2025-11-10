@@ -3,7 +3,13 @@ import { persist } from 'zustand/middleware'
 
 export type ImportPreviewRecord = {
   id: string
-  recordType: 'account_balance' | 'revenue' | 'expense' | 'income_forecast' | 'revenue_forecast'
+  recordType:
+    | 'account_balance'
+    | 'revenue'
+    | 'expense'
+    | 'income_forecast'
+    | 'expense_forecast'
+    | 'revenue_forecast'
   payload: Record<string, unknown>
   confidence?: number
   warnings?: string[]

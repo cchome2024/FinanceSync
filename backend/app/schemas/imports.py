@@ -11,6 +11,7 @@ class RecordType(str, Enum):
     REVENUE = "revenue"
     EXPENSE = "expense"
     INCOME_FORECAST = "income_forecast"
+    EXPENSE_FORECAST = "expense_forecast"
     REVENUE_FORECAST = "revenue_forecast"
 
 

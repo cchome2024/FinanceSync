@@ -28,6 +28,19 @@ class ForecastSummary(BaseModel):
 
     certain: float = 0.0
     uncertain: float = 0.0
+    expenses_monthly: List["MonthlyExpenseItem"] = Field(default_factory=list, alias="expensesMonthly")
+    incomes_monthly: List["MonthlyIncomeItem"] = Field(default_factory=list, alias="incomesMonthly")
+
+
+class MonthlyExpenseItem(BaseModel):
+    month: str
+    amount: float
+
+
+class MonthlyIncomeItem(BaseModel):
+    month: str
+    certain: float
+    uncertain: float
 
 
 class CompanyOverview(BaseModel):
@@ -58,6 +71,16 @@ class RevenueSummaryNode(BaseModel):
     children: List['RevenueSummaryNode'] = Field(default_factory=list)
     forecast_monthly: Optional[List[float]] = Field(default=None, alias="forecastMonthly")
     forecast_total: Optional[float] = Field(default=None, alias="forecastTotal")
+    forecast_certain_monthly: Optional[List[float]] = Field(
+        default=None, alias="forecastCertainMonthly"
+    )
+    forecast_uncertain_monthly: Optional[List[float]] = Field(
+        default=None, alias="forecastUncertainMonthly"
+    )
+    forecast_certain_total: Optional[float] = Field(default=None, alias="forecastCertainTotal")
+    forecast_uncertain_total: Optional[float] = Field(
+        default=None, alias="forecastUncertainTotal"
+    )
 
 
 class RevenueSummaryTotals(BaseModel):
@@ -65,6 +88,16 @@ class RevenueSummaryTotals(BaseModel):
     total: float
     forecast_monthly: Optional[List[float]] = Field(default=None, alias="forecastMonthly")
     forecast_total: Optional[float] = Field(default=None, alias="forecastTotal")
+    forecast_certain_monthly: Optional[List[float]] = Field(
+        default=None, alias="forecastCertainMonthly"
+    )
+    forecast_uncertain_monthly: Optional[List[float]] = Field(
+        default=None, alias="forecastUncertainMonthly"
+    )
+    forecast_certain_total: Optional[float] = Field(default=None, alias="forecastCertainTotal")
+    forecast_uncertain_total: Optional[float] = Field(
+        default=None, alias="forecastUncertainTotal"
+    )
 
 
 class RevenueSummaryResponse(BaseModel):
@@ -77,6 +110,8 @@ class RevenueSummaryResponse(BaseModel):
 
 
 RevenueSummaryNode.model_rebuild()
+MonthlyExpenseItem.model_rebuild()
+MonthlyIncomeItem.model_rebuild()
 
 
 class BalanceHistoryItem(BaseModel):

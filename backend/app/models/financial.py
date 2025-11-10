@@ -77,6 +77,7 @@ class FinanceCategory(Base):
     revenue_details: Mapped[list["RevenueDetail"]] = relationship(back_populates="category_ref")
     expense_records: Mapped[list["ExpenseRecord"]] = relationship(back_populates="category_ref")
     income_forecasts: Mapped[list["IncomeForecast"]] = relationship(back_populates="category_ref")
+    expense_forecasts: Mapped[list["ExpenseForecast"]] = relationship(back_populates="category_ref")
 
 
 class Company(Base):
@@ -96,6 +97,7 @@ class Company(Base):
     revenue_details: Mapped[list["RevenueDetail"]] = relationship(back_populates="company")
     expense_records: Mapped[list["ExpenseRecord"]] = relationship(back_populates="company")
     income_forecasts: Mapped[list["IncomeForecast"]] = relationship(back_populates="company")
+    expense_forecasts: Mapped[list["ExpenseForecast"]] = relationship(back_populates="company")
 
 
 class ImportJob(Base):
@@ -262,6 +264,42 @@ class IncomeForecast(Base):
     company: Mapped[Company] = relationship(back_populates="income_forecasts")
     import_job: Mapped[ImportJob] = relationship()
     category_ref: Mapped[Optional["FinanceCategory"]] = relationship(back_populates="income_forecasts")
+
+
+class ExpenseForecast(Base):
+    __tablename__ = "expense_forecasts"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "cash_out_date",
+            "expected_amount",
+            "category_id",
+            "description",
+            "account_name",
+            name="uq_expense_forecast_natural_key",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id: Mapped[str] = mapped_column(String(36), ForeignKey("companies.id"), nullable=False)
+    import_job_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("import_jobs.id"))
+    category_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("finance_categories.id"))
+    cash_out_date: Mapped[date] = mapped_column(Date, nullable=False)
+    certainty: Mapped[Certainty] = mapped_column(Enum(Certainty), nullable=False, default=Certainty.CERTAIN)
+    category: Mapped[str | None] = mapped_column(String(64))
+    category_path_text: Mapped[str | None] = mapped_column(String(512))
+    category_label: Mapped[str | None] = mapped_column(String(128))
+    subcategory_label: Mapped[str | None] = mapped_column(String(128))
+    description: Mapped[str | None] = mapped_column(String(255))
+    account_name: Mapped[str | None] = mapped_column(String(64))
+    expected_amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(8), default="CNY")
+    confidence: Mapped[float | None] = mapped_column(Float)
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    company: Mapped[Company] = relationship(back_populates="expense_forecasts")
+    import_job: Mapped[ImportJob] = relationship()
+    category_ref: Mapped[Optional["FinanceCategory"]] = relationship(back_populates="expense_forecasts")
 
 
 class ConfirmationLog(Base):

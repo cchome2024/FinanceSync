@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.models.financial import (
     AccountBalance,
     Company,
+    ExpenseForecast,
     ExpenseRecord,
     FinanceCategory,
     IncomeForecast,
@@ -36,7 +37,8 @@ class _CompanyAggregates:
     balance: Optional[AccountBalance] = None
     revenue: Optional["_RevenueMonthlySnapshot"] = None
     expense: Optional[ExpenseRecord] = None
-    forecasts: List[IncomeForecast] = None
+    income_forecasts: List[IncomeForecast] = None
+    expense_forecasts: List[ExpenseForecast] = None
 
 
 @dataclass
@@ -58,7 +60,14 @@ class FinancialOverviewService:
             as_of = datetime.now(UTC).date()
 
         companies = self._load_companies(company_id)
-        aggregates = {company.id: _CompanyAggregates(company=company, forecasts=[]) for company in companies}
+        aggregates = {
+            company.id: _CompanyAggregates(
+                company=company,
+                income_forecasts=[],
+                expense_forecasts=[],
+            )
+            for company in companies
+        }
 
         self._attach_latest_balances(aggregates.values(), as_of)
         self._attach_latest_revenue(aggregates.values(), as_of)
@@ -72,7 +81,11 @@ class FinancialOverviewService:
                 balances=self._build_balance_summary(aggregate.balance),
                 revenue=self._build_flow_summary(aggregate.revenue),
                 expense=self._build_flow_summary(aggregate.expense),
-                forecast=self._build_forecast_summary(aggregate.forecasts),
+                forecast=self._build_forecast_summary(
+                    aggregate.income_forecasts,
+                    aggregate.expense_forecasts,
+                    as_of,
+                ),
             )
             for aggregate in aggregates.values()
         ]
@@ -202,17 +215,25 @@ class FinancialOverviewService:
         if not company_ids:
             return
 
-        stmt = (
+        income_stmt = (
             select(IncomeForecast)
             .where(IncomeForecast.company_id.in_(company_ids))
-            .where(IncomeForecast.cash_in_date >= as_of)
         )
-        grouped: Dict[str, List[IncomeForecast]] = {aggregate.company.id: [] for aggregate in aggregates}
-        for forecast, in self._session.execute(stmt):
-            grouped.setdefault(forecast.company_id, []).append(forecast)
+        income_grouped: Dict[str, List[IncomeForecast]] = {aggregate.company.id: [] for aggregate in aggregates}
+        for forecast, in self._session.execute(income_stmt):
+            income_grouped.setdefault(forecast.company_id, []).append(forecast)
+
+        expense_stmt = (
+            select(ExpenseForecast)
+            .where(ExpenseForecast.company_id.in_(company_ids))
+        )
+        expense_grouped: Dict[str, List[ExpenseForecast]] = {aggregate.company.id: [] for aggregate in aggregates}
+        for forecast, in self._session.execute(expense_stmt):
+            expense_grouped.setdefault(forecast.company_id, []).append(forecast)
 
         for aggregate in aggregates:
-            aggregate.forecasts = grouped.get(aggregate.company.id, [])
+            aggregate.income_forecasts = income_grouped.get(aggregate.company.id, [])
+            aggregate.expense_forecasts = expense_grouped.get(aggregate.company.id, [])
 
     def _build_balance_summary(self, balance: Optional[AccountBalance]) -> Optional[BalanceSummary]:
         if not balance:
@@ -244,18 +265,58 @@ class FinancialOverviewService:
             return None
         return FlowSummary(period=period_str, amount=self._to_float(amount_value), currency=currency)
 
-    def _build_forecast_summary(self, forecasts: Optional[List[IncomeForecast]]) -> Optional[ForecastSummary]:
-        if not forecasts:
+    def _build_forecast_summary(
+        self,
+        income_forecasts: Optional[List[IncomeForecast]],
+        expense_forecasts: Optional[List[ExpenseForecast]],
+        as_of: date,
+    ) -> Optional[ForecastSummary]:
+        if not income_forecasts and not expense_forecasts:
             return None
         certain_total = 0.0
         uncertain_total = 0.0
-        for forecast in forecasts:
+        income_stats: Dict[str, Dict[str, float]] = {}
+        for forecast in income_forecasts or []:
             amt = self._to_float(forecast.expected_amount)
             if forecast.certainty == Certainty.CERTAIN:
                 certain_total += amt
             else:
                 uncertain_total += amt
-        return ForecastSummary(certain=certain_total, uncertain=uncertain_total)
+            if forecast.certainty in (Certainty.CERTAIN, Certainty.UNCERTAIN):
+                key = forecast.cash_in_date.strftime("%Y-%m")
+                stats = income_stats.setdefault(key, {"certain": 0.0, "uncertain": 0.0})
+                if forecast.certainty == Certainty.CERTAIN:
+                    stats["certain"] += amt
+                else:
+                    stats["uncertain"] += amt
+
+        expense_monthly: Dict[str, float] = {}
+        for forecast in expense_forecasts or []:
+            if forecast.cash_out_date < as_of:
+                continue
+            key = forecast.cash_out_date.strftime("%Y-%m")
+            expense_monthly[key] = expense_monthly.get(key, 0.0) + self._to_float(forecast.expected_amount)
+
+        sorted_expenses = [
+            {"month": month, "amount": round(amount, 2)}
+            for month, amount in sorted(expense_monthly.items())
+        ]
+
+        incomes_monthly = [
+            {
+                "month": month,
+                "certain": round(values["certain"], 2),
+                "uncertain": round(values["uncertain"], 2),
+            }
+            for month, values in sorted(income_stats.items())
+        ]
+
+        return ForecastSummary(
+            certain=certain_total,
+            uncertain=uncertain_total,
+            expenses_monthly=sorted_expenses,
+            incomes_monthly=incomes_monthly,
+        )
 
     @staticmethod
     def _to_float(value: Decimal | float | int | None) -> float:
@@ -333,8 +394,10 @@ class FinancialOverviewService:
                 path_stats[path] = {
                     "actual_monthly": [0.0] * 12,
                     "actual_sum": 0.0,
-                    "forecast_monthly": [0.0] * 12,
-                    "forecast_sum": 0.0,
+                    "forecast_certain_monthly": [0.0] * 12,
+                    "forecast_uncertain_monthly": [0.0] * 12,
+                    "forecast_certain_sum": 0.0,
+                    "forecast_uncertain_sum": 0.0,
                 }
             return path_stats[path]
 
@@ -355,7 +418,8 @@ class FinancialOverviewService:
             return tuple(segments)
 
         grand_actual_monthly = [0.0] * 12
-        grand_forecast_monthly = [0.0] * 12
+        grand_forecast_certain_monthly = [0.0] * 12
+        grand_forecast_uncertain_monthly = [0.0] * 12
 
         for detail, category in results:
             amount = self._to_float(detail.amount)
@@ -389,8 +453,12 @@ class FinancialOverviewService:
             for depth in range(1, len(tuple_path) + 1):
                 subpath = tuple_path[:depth]
                 stats = ensure_path(subpath)
-                stats["forecast_monthly"][month_idx] += amount  # type: ignore[index]
-                stats["forecast_sum"] += amount  # type: ignore[operator]
+                if forecast.certainty == Certainty.CERTAIN:
+                    stats["forecast_certain_monthly"][month_idx] += amount  # type: ignore[index]
+                    stats["forecast_certain_sum"] += amount  # type: ignore[operator]
+                else:
+                    stats["forecast_uncertain_monthly"][month_idx] += amount  # type: ignore[index]
+                    stats["forecast_uncertain_sum"] += amount  # type: ignore[operator]
 
                 if depth == 1 and subpath not in root_order:
                     root_order.append(subpath)
@@ -398,7 +466,10 @@ class FinancialOverviewService:
                     parent = tuple_path[: depth - 1]
                     add_child(parent, subpath)
 
-            grand_forecast_monthly[month_idx] += amount
+            if forecast.certainty == Certainty.CERTAIN:
+                grand_forecast_certain_monthly[month_idx] += amount
+            else:
+                grand_forecast_uncertain_monthly[month_idx] += amount
 
         def build_node(path: Tuple[str, ...]) -> RevenueSummaryNode:
             level = len(path)
@@ -423,10 +494,14 @@ class FinancialOverviewService:
             )
 
             if include_forecast:
-                forecast_monthly = [round(value, 2) for value in stats["forecast_monthly"]]  # type: ignore[arg-type]
-                forecast_total = round(stats["forecast_sum"], 2)  # type: ignore[arg-type]
-                node_kwargs["forecastMonthly"] = forecast_monthly
-                node_kwargs["forecastTotal"] = forecast_total
+                forecast_certain_monthly = [round(value, 2) for value in stats["forecast_certain_monthly"]]  # type: ignore[arg-type]
+                forecast_uncertain_monthly = [round(value, 2) for value in stats["forecast_uncertain_monthly"]]  # type: ignore[arg-type]
+                forecast_certain_total = round(stats["forecast_certain_sum"], 2)  # type: ignore[arg-type]
+                forecast_uncertain_total = round(stats["forecast_uncertain_sum"], 2)  # type: ignore[arg-type]
+                node_kwargs["forecastCertainMonthly"] = forecast_certain_monthly
+                node_kwargs["forecastUncertainMonthly"] = forecast_uncertain_monthly
+                node_kwargs["forecastCertainTotal"] = forecast_certain_total
+                node_kwargs["forecastUncertainTotal"] = forecast_uncertain_total
 
             return RevenueSummaryNode(**node_kwargs)
 
@@ -441,10 +516,12 @@ class FinancialOverviewService:
         )
 
         if include_forecast:
-            grand_forecast = [round(value, 2) for value in grand_forecast_monthly]
-            grand_forecast_total = round(sum(grand_forecast_monthly), 2)
-            totals_kwargs["forecastMonthly"] = grand_forecast
-            totals_kwargs["forecastTotal"] = grand_forecast_total
+            grand_certain = [round(value, 2) for value in grand_forecast_certain_monthly]
+            grand_uncertain = [round(value, 2) for value in grand_forecast_uncertain_monthly]
+            totals_kwargs["forecastCertainMonthly"] = grand_certain
+            totals_kwargs["forecastUncertainMonthly"] = grand_uncertain
+            totals_kwargs["forecastCertainTotal"] = round(sum(grand_forecast_certain_monthly), 2)
+            totals_kwargs["forecastUncertainTotal"] = round(sum(grand_forecast_uncertain_monthly), 2)
 
         return RevenueSummaryResponse(
             year=year,

@@ -159,8 +159,10 @@ def test_revenue_summary_returns_hierarchy(client: TestClient) -> None:
     assert payload["totals"]["monthly"][0] == 100.0
     assert payload["totals"]["monthly"][1] == 230.0
     assert payload["totals"]["monthly"][2] == 50.0
-    assert payload["totals"].get("forecastMonthly") in (None, [])
-    assert payload["totals"].get("forecastTotal") in (None, 0)
+    assert payload["totals"].get("forecastCertainMonthly") in (None, [])
+    assert payload["totals"].get("forecastUncertainMonthly") in (None, [])
+    assert payload["totals"].get("forecastCertainTotal") in (None, 0)
+    assert payload["totals"].get("forecastUncertainTotal") in (None, 0)
 
     nodes = payload["nodes"]
     assert len(nodes) == 2
@@ -202,15 +204,16 @@ def test_revenue_summary_with_forecast(client: TestClient) -> None:
     payload = response.json()
 
     totals = payload["totals"]
-    assert totals["forecastTotal"] == 230.0
-    assert totals["forecastMonthly"][3] == 150.0
-    assert totals["forecastMonthly"][4] == 80.0
+    assert totals["forecastCertainTotal"] == 150.0
+    assert totals["forecastUncertainTotal"] == 80.0
+    assert totals["forecastCertainMonthly"][3] == 150.0
+    assert totals["forecastUncertainMonthly"][4] == 80.0
 
     nodes = payload["nodes"]
     internet_services = next(node for node in nodes if node["label"] == "互联网基金服务")
-    assert internet_services["forecastTotal"] == 150.0
-    assert internet_services["forecastMonthly"][3] == 150.0
+    assert internet_services["forecastCertainTotal"] == 150.0
+    assert internet_services["forecastCertainMonthly"][3] == 150.0
 
     training = next(node for node in nodes if node["label"] == "培训服务")
-    assert training["forecastTotal"] == 80.0
-    assert training["forecastMonthly"][4] == 80.0
+    assert training["forecastUncertainTotal"] == 80.0
+    assert training["forecastUncertainMonthly"][4] == 80.0

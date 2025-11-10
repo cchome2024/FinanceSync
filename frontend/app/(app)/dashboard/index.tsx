@@ -22,6 +22,7 @@ type FlowSummary = {
 type ForecastSummary = {
   certain: number
   uncertain: number
+  expensesMonthly?: Array<{ month: string; amount: number }>
 }
 
 type CompanyOverview = {
@@ -45,6 +46,10 @@ type RevenueSummaryNode = {
   total: number
   forecastMonthly?: number[]
   forecastTotal?: number
+  forecastCertainMonthly?: number[]
+  forecastUncertainMonthly?: number[]
+  forecastCertainTotal?: number
+  forecastUncertainTotal?: number
   children?: RevenueSummaryNode[]
 }
 
@@ -53,6 +58,10 @@ type RevenueSummaryTotals = {
   total: number
   forecastMonthly?: number[]
   forecastTotal?: number
+  forecastCertainMonthly?: number[]
+  forecastUncertainMonthly?: number[]
+  forecastCertainTotal?: number
+  forecastUncertainTotal?: number
 }
 
 type RevenueSummaryResponse = {
@@ -178,6 +187,10 @@ useFocusEffect(
       total: number
       forecastMonthly?: number[]
       forecastTotal?: number
+      forecastCertainMonthly?: number[]
+      forecastUncertainMonthly?: number[]
+      forecastCertainTotal?: number
+      forecastUncertainTotal?: number
       hasChildren: boolean
       expanded: boolean
     }
@@ -197,6 +210,10 @@ useFocusEffect(
           total: node.total,
           forecastMonthly: node.forecastMonthly,
           forecastTotal: node.forecastTotal,
+          forecastCertainMonthly: node.forecastCertainMonthly,
+          forecastUncertainMonthly: node.forecastUncertainMonthly,
+          forecastCertainTotal: node.forecastCertainTotal,
+          forecastUncertainTotal: node.forecastUncertainTotal,
           hasChildren,
           expanded,
         })
@@ -306,6 +323,23 @@ useFocusEffect(
                       确定 {currentCompany.forecast.certain.toLocaleString()} 元 · 非确定{' '}
                       {currentCompany.forecast.uncertain.toLocaleString()} 元
                     </Text>
+                    {currentCompany.forecast.expensesMonthly && currentCompany.forecast.expensesMonthly.length > 0 ? (
+                      <View style={styles.expenseForecastBlock}>
+                        <Text style={styles.expenseForecastTitle}>支出预测</Text>
+                        {currentCompany.forecast.expensesMonthly.map((item) => (
+                          <View key={item.month} style={styles.expenseForecastRow}>
+                            <Text style={styles.expenseForecastMonth}>{item.month}</Text>
+                            <Text style={styles.expenseForecastAmount}>
+                              {(item.amount / 10000).toLocaleString('zh-CN', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                              万元
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    ) : null}
                   </>
                 ) : (
                   <Text style={styles.cardDetail}>暂无预测数据</Text>
@@ -348,8 +382,12 @@ useFocusEffect(
                   <Text style={styles.legendText}>实际收入</Text>
                 </View>
                 <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, styles.legendDotForecast]} />
-                  <Text style={styles.legendText}>预测收入</Text>
+                  <View style={[styles.legendDot, styles.legendDotForecastCertain]} />
+                  <Text style={styles.legendText}>确定预测</Text>
+                </View>
+                <View style={styles.legendItem}>
+                  <View style={[styles.legendDot, styles.legendDotForecastUncertain]} />
+                  <Text style={styles.legendText}>非确定预测</Text>
                 </View>
               </View>
             )}
@@ -400,28 +438,42 @@ useFocusEffect(
                         </View>
                       </View>
                       {row.monthly.map((value, idx) => {
-                        const forecastValue = row.forecastMonthly?.[idx] ?? 0
+                        const certainValue = row.forecastCertainMonthly?.[idx] ?? 0
+                        const uncertainValue = row.forecastUncertainMonthly?.[idx] ?? 0
                         const actualText = formatAmount(value)
-                        const forecastText = includeForecast ? formatForecastAmount(forecastValue) : ''
-                        const showForecast = includeForecast && !!forecastText
+                        const certainText = includeForecast ? formatForecastAmount(certainValue) : ''
+                        const uncertainText = includeForecast ? formatForecastAmount(uncertainValue) : ''
+                        const showCertain = includeForecast && !!certainText
+                        const showUncertain = includeForecast && !!uncertainText
                         return (
                           <Text key={`${row.key}-m-${idx}`} style={styles.tableCell}>
-                            {actualText || (showForecast ? ' ' : '')}
-                            {showForecast ? '\n' : ''}
-                            {showForecast ? <Text style={styles.forecastValue}>{forecastText}</Text> : null}
+                            {actualText || (showCertain || showUncertain ? ' ' : '')}
+                            {showCertain ? '\n' : ''}
+                            {showCertain ? <Text style={styles.forecastCertainValue}>{certainText}</Text> : null}
+                            {showUncertain ? '\n' : ''}
+                            {showUncertain ? (
+                              <Text style={styles.forecastUncertainValue}>{uncertainText}</Text>
+                            ) : null}
                           </Text>
                         )
                       })}
                       {(() => {
-                        const forecastValue = row.forecastTotal ?? 0
+                        const forecastCertain = row.forecastCertainTotal ?? 0
+                        const forecastUncertain = row.forecastUncertainTotal ?? 0
                         const actualText = formatAmount(row.total)
-                        const forecastText = includeForecast ? formatForecastAmount(forecastValue) : ''
-                        const showForecast = includeForecast && !!forecastText
+                        const certainText = includeForecast ? formatForecastAmount(forecastCertain) : ''
+                        const uncertainText = includeForecast ? formatForecastAmount(forecastUncertain) : ''
+                        const showCertain = includeForecast && !!certainText
+                        const showUncertain = includeForecast && !!uncertainText
                         return (
                           <Text style={[styles.tableCell, styles.totalColumn]}>
-                            {actualText || (showForecast ? ' ' : '')}
-                            {showForecast ? '\n' : ''}
-                            {showForecast ? <Text style={styles.forecastValue}>{forecastText}</Text> : null}
+                            {actualText || (showCertain || showUncertain ? ' ' : '')}
+                            {showCertain ? '\n' : ''}
+                            {showCertain ? <Text style={styles.forecastCertainValue}>{certainText}</Text> : null}
+                            {showUncertain ? '\n' : ''}
+                            {showUncertain ? (
+                              <Text style={styles.forecastUncertainValue}>{uncertainText}</Text>
+                            ) : null}
                           </Text>
                         )
                       })()}
@@ -430,28 +482,42 @@ useFocusEffect(
                   <View style={[styles.tableRow, styles.tableTotalRow]}>
                     <Text style={[styles.tableCell, styles.labelColumn]}>合计</Text>
                     {revenueSummary.totals.monthly.map((value, idx) => {
-                      const forecastValue = revenueSummary.totals.forecastMonthly?.[idx] ?? 0
+                      const forecastCertain = revenueSummary.totals.forecastCertainMonthly?.[idx] ?? 0
+                      const forecastUncertain = revenueSummary.totals.forecastUncertainMonthly?.[idx] ?? 0
                       const actualText = formatAmount(value)
-                      const forecastText = includeForecast ? formatForecastAmount(forecastValue) : ''
-                      const showForecast = includeForecast && !!forecastText
+                      const certainText = includeForecast ? formatForecastAmount(forecastCertain) : ''
+                      const uncertainText = includeForecast ? formatForecastAmount(forecastUncertain) : ''
+                      const showCertain = includeForecast && !!certainText
+                      const showUncertain = includeForecast && !!uncertainText
                       return (
                         <Text key={`total-${idx}`} style={styles.tableCell}>
-                          {actualText || (showForecast ? ' ' : '')}
-                          {showForecast ? '\n' : ''}
-                          {showForecast ? <Text style={styles.forecastValue}>{forecastText}</Text> : null}
+                          {actualText || (showCertain || showUncertain ? ' ' : '')}
+                          {showCertain ? '\n' : ''}
+                          {showCertain ? <Text style={styles.forecastCertainValue}>{certainText}</Text> : null}
+                          {showUncertain ? '\n' : ''}
+                          {showUncertain ? (
+                            <Text style={styles.forecastUncertainValue}>{uncertainText}</Text>
+                          ) : null}
                         </Text>
                       )
                     })}
                     {(() => {
-                      const forecastValue = revenueSummary.totals.forecastTotal ?? 0
+                      const forecastCertain = revenueSummary.totals.forecastCertainTotal ?? 0
+                      const forecastUncertain = revenueSummary.totals.forecastUncertainTotal ?? 0
                       const actualText = formatAmount(revenueSummary.totals.total)
-                      const forecastText = includeForecast ? formatForecastAmount(forecastValue) : ''
-                      const showForecast = includeForecast && !!forecastText
+                      const certainText = includeForecast ? formatForecastAmount(forecastCertain) : ''
+                      const uncertainText = includeForecast ? formatForecastAmount(forecastUncertain) : ''
+                      const showCertain = includeForecast && !!certainText
+                      const showUncertain = includeForecast && !!uncertainText
                       return (
                         <Text style={[styles.tableCell, styles.totalColumn]}>
-                          {actualText || (showForecast ? ' ' : '')}
-                          {showForecast ? '\n' : ''}
-                          {showForecast ? <Text style={styles.forecastValue}>{forecastText}</Text> : null}
+                          {actualText || (showCertain || showUncertain ? ' ' : '')}
+                          {showCertain ? '\n' : ''}
+                          {showCertain ? <Text style={styles.forecastCertainValue}>{certainText}</Text> : null}
+                          {showUncertain ? '\n' : ''}
+                          {showUncertain ? (
+                            <Text style={styles.forecastUncertainValue}>{uncertainText}</Text>
+                          ) : null}
                         </Text>
                       )
                     })()}
@@ -563,6 +629,30 @@ const styles = StyleSheet.create({
     color: '#F8FAFC',
     fontSize: 18,
     fontWeight: '600',
+  },
+  expenseForecastBlock: {
+    marginTop: 12,
+    gap: 6,
+  },
+  expenseForecastTitle: {
+    color: '#FACC15',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  expenseForecastRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  expenseForecastMonth: {
+    color: '#CBD5F5',
+    fontSize: 12,
+  },
+  expenseForecastAmount: {
+    color: '#FACC15',
+    fontSize: 12,
+    fontVariant: ['lining-nums'],
   },
   cardDetail: {
     color: '#CBD5F5',
@@ -679,8 +769,11 @@ const styles = StyleSheet.create({
   legendDotActual: {
     backgroundColor: '#60A5FA',
   },
-  legendDotForecast: {
-    backgroundColor: '#FACC15',
+  legendDotForecastCertain: {
+    backgroundColor: '#34D399',
+  },
+  legendDotForecastUncertain: {
+    backgroundColor: '#F97316',
   },
   legendText: {
     color: '#CBD5F5',
@@ -758,8 +851,12 @@ const styles = StyleSheet.create({
   totalColumn: {
     minWidth: 96,
   },
-  forecastValue: {
-    color: '#FACC15',
+  forecastCertainValue: {
+    color: '#34D399',
+    fontSize: 12,
+  },
+  forecastUncertainValue: {
+    color: '#F97316',
     fontSize: 12,
   },
 })

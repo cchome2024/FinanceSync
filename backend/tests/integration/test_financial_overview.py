@@ -17,6 +17,7 @@ from app.models.base import Base
 from app.models.financial import (
     AccountBalance,
     Company,
+    ExpenseForecast,
     ExpenseRecord,
     ImportJob,
     ImportSource,
@@ -44,6 +45,7 @@ def client_fixture(tmp_path) -> TestClient:
 def _seed_data():
     today = datetime(2025, 11, 3, 12, 0, 0)
     with db.session_scope() as session:
+        session.query(ExpenseForecast).delete()
         session.query(IncomeForecast).delete()
         session.query(ExpenseRecord).delete()
         session.query(RevenueDetail).delete()
@@ -101,6 +103,14 @@ def _seed_data():
                 IncomeForecast(
                     company_id=acme.id,
                     import_job_id=job.id,
+                    cash_in_date=date(2025, 11, 2),
+                    certainty=Certainty.CERTAIN,
+                    expected_amount=20000,
+                    currency="CNY",
+                ),
+                IncomeForecast(
+                    company_id=acme.id,
+                    import_job_id=job.id,
                     cash_in_date=date(2025, 12, 1),
                     certainty=Certainty.CERTAIN,
                     expected_amount=60000,
@@ -112,6 +122,22 @@ def _seed_data():
                     cash_in_date=date(2026, 1, 15),
                     certainty=Certainty.UNCERTAIN,
                     expected_amount=40000,
+                    currency="CNY",
+                ),
+                ExpenseForecast(
+                    company_id=acme.id,
+                    import_job_id=job.id,
+                    cash_out_date=date(2025, 11, 20),
+                    certainty=Certainty.CERTAIN,
+                    expected_amount=25000,
+                    currency="CNY",
+                ),
+                ExpenseForecast(
+                    company_id=acme.id,
+                    import_job_id=job.id,
+                    cash_out_date=date(2025, 12, 5),
+                    certainty=Certainty.UNCERTAIN,
+                    expected_amount=18000,
                     currency="CNY",
                 ),
             ]
@@ -134,8 +160,10 @@ def test_financial_overview_returns_latest_snapshot(client: TestClient) -> None:
     assert revenue["period"] == "2025-11"
 
     forecast = payload["companies"][0]["forecast"]
-    assert forecast["certain"] == 60000
+    assert forecast["certain"] == 80000
     assert forecast["uncertain"] == 40000
+    assert forecast["expensesMonthly"][0] == {"month": "2025-11", "amount": 25000.0}
+    assert forecast["expensesMonthly"][1] == {"month": "2025-12", "amount": 18000.0}
 
 
 def test_financial_overview_filters_by_company(client: TestClient) -> None:

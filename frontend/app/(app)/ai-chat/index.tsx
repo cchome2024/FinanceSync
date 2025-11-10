@@ -20,7 +20,13 @@ import { useFinanceStore } from '@/src/state/financeStore'
 import { NavLink } from '@/components/common/NavLink'
 
 type CandidateRecord = {
-  recordType: 'account_balance' | 'revenue' | 'expense' | 'income_forecast' | 'revenue_forecast'
+  recordType:
+    | 'account_balance'
+    | 'revenue'
+    | 'expense'
+    | 'income_forecast'
+    | 'expense_forecast'
+    | 'revenue_forecast'
   payload: Record<string, unknown>
   confidence?: number
   warnings?: string[]
@@ -174,6 +180,7 @@ export default function AIChatScreen() {
         expense: '支出',
         income_forecast: '收入预测',
         revenue_forecast: '收入预测',
+        expense_forecast: '支出预测',
       }
       const counts: Record<CandidateRecord['recordType'], number> = {
         account_balance: 0,
@@ -181,6 +188,7 @@ export default function AIChatScreen() {
         expense: 0,
         income_forecast: 0,
         revenue_forecast: 0,
+        expense_forecast: 0,
       }
       response.preview.forEach((record) => {
         counts[record.recordType] += 1
