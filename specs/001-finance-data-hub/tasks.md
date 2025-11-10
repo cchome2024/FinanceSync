@@ -74,6 +74,8 @@
 - [x] T024B [US1] 调整业务记录引用新的分类表，确保导入与展示兼容
 - [x] T024C [US1] 拆分“数据录入”与“查询分析”两套 AI 对话路由及状态管理 `frontend/app/(app)`
 - [x] T024D [US1] 后端会话上下文与日志按对话类型区分存储，接口层暴露独立端点
+- [x] T024E [US1] 扩展导入模型与仓储以支持收入/支出预测的去重与覆盖 `backend/app/repositories/import_jobs.py`
+- [x] T024F [US1] 新增支出预测实体、迁移与导入测试 `backend/app/models/financial.py`, `backend/migrations/`, `backend/tests/integration/test_import_flow.py`
 
 **Checkpoint**: AI 对话导入流程可从输入到确认全程跑通并写入数据库。
 
@@ -97,6 +99,8 @@
 - [ ] T029 [US2] 集成导出接口 `backend/app/api/v1/reports.py`
 - [x] T030 [P] [US2] 实现看板页面与筛选控件 `frontend/app/(app)/dashboard/index.tsx`
 - [x] T031 [P] [US2] 构建复用型图表组件 `frontend/components/charts/FinancialTrends.tsx`
+- [x] T031A [US2] 优化仪表板收入汇总，对预测数据进行颜色标识与层级筛选 `frontend/app/(app)/dashboard/index.tsx`
+- [x] T031B [US2] 聚合预测现金流卡片，整合收入/支出预测与全局汇总 `backend/app/services/financial_overview.py`
 - [ ] T032 [US2] 在看板中接入导出与历史快照展示 `frontend/app/(app)/dashboard/export.tsx`
 
 **Checkpoint**: 管理层可在前端查看最新与历史数据，并成功导出符合筛选条件的报表。

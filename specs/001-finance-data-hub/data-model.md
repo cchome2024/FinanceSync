@@ -8,6 +8,7 @@
 | RevenueDetail | 收入明细原子记录，按发生日期与多级分类存储 | 属于 Company；关联 ImportJob |
 | ExpenseRecord | 支出明细，按大类/月份记录 | 属于 Company；关联 ImportJob |
 | IncomeForecast | 收入预测，包含确定性/非确定性、资管产品维度 | 属于 Company；可与 RevenueDetail 做对比 |
+| ExpenseForecast | 支出预测，记录未来现金流出时间与金额 | 属于 Company；可与 ExpenseRecord 做对比 |
 | ImportJob | 描述一次 AI 导入任务（上传或目录监控）及状态 | 关联多条 AccountBalance/RevenueDetail/ExpenseRecord/IncomeForecast |
 | ConfirmationLog | 记录用户或 AI 的确认操作、修改意见 | 关联 ImportJob 与具体财务记录 |
 | NlqQuery | 自然语言问题及执行结果快照 | 可引用生成的报表或图表配置 |
@@ -19,7 +20,7 @@
 ### Company
 - **字段**: `id`, `name`, `display_name`, `currency`, `created_at`, `updated_at`
 - **约束**: `name` 唯一；默认币种为 CNY。
-- **关系**: `has_many` AccountBalance/RevenueDetail/ExpenseRecord/IncomeForecast。
+- **关系**: `has_many` AccountBalance/RevenueDetail/ExpenseRecord/IncomeForecast/ExpenseForecast。
 
 ### ImportJob
 - **字段**: `id`, `source_type` (manual_upload / watched_dir / ai_chat), `status` (pending_review / approved / rejected / failed), `initiator_id`, `initiator_role`, `llm_model`, `confidence_score`, `started_at`, `completed_at`, `raw_payload_ref`, `error_log`
@@ -45,24 +46,12 @@
 
 ### IncomeForecast
 - **字段**: `id`, `company_id`, `import_job_id`, `cash_in_date`, `product_line`, `product_name`, `certainty` (certain/uncertain), `category`, `expected_amount`, `currency`, `confidence`, `notes`
-- **验证**: `expected_amount` > 0；`certainty` 枚举；`cash_in_date` >= today。
+- **验证**: `expected_amount` > 0；`certainty` 枚举；`cash_in_date` 允许历史月份（回填预测数据时保持原始日期）。
+
+### ExpenseForecast
+- **字段**: `id`, `company_id`, `import_job_id`, `cash_out_date`, `category`, `category_path_text`, `category_label`, `subcategory_label`, `certainty`, `expected_amount`, `currency`, `account_name`, `description`, `confidence`, `notes`
+- **约束**: 以公司、日期、分类、描述、账户为自然键，避免重复；金额必须大于 0。
+- **用途**: 与 IncomeForecast 一同驱动预测现金流卡片，支出侧按月份聚合，提示确定性。
 
 ### ConfirmationLog
-- **字段**: `id`, `import_job_id`, `record_type`, `record_id`, `actor_id`, `actor_role`, `action` (confirmed/edited/rejected), `diff_snapshot`, `comment`, `created_at`
-- **用途**: 满足 FR-005 的追溯要求。
-
-### NlqQuery
-- **字段**: `id`, `actor_id`, `question`, `generated_sql`, `execution_result_ref`, `chart_spec`, `responded_at`, `latency_ms`
-- **验证**: SQL 保存为只读；记录 chart 类型（line/bar/pie/table）。
-
-## 字典与配置
-- **Category Dictionary**: 收入/支出/预测类别均由配置表维护，支持层级结构。
-- **LLM Model Registry**: 记录可用模型、速率限制、费用估算。
-
-## 数据流
-1. 用户在 AI 聊天窗口提交资料 → 创建 `ImportJob (pending_review)` + `Attachment`。
-2. 后端 worker 解析 → 生成候选财务记录（仍标记为 `pending_review`）+ 初始 `confidence_score`。
-3. 财务人员确认 → 写入正式表并记录 `ConfirmationLog`，`ImportJob` 状态更新为 `approved`。
-4. 仪表板查询默认只读取 `approved` 记录。
-5. 自然语言查询将结果存入 `NlqQuery`，供历史追踪与调试。
-
+- **字段**: `id`, `import_job_id`, `record_type`, `record_id`, `actor_id`, `actor_role`, `action` (confirmed/edited/rejected), `diff_snapshot`, `
