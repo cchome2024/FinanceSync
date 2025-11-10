@@ -85,6 +85,7 @@ class FinancialOverviewService:
                     aggregate.income_forecasts,
                     aggregate.expense_forecasts,
                     as_of,
+                    aggregate.company.id,
                 ),
             )
             for aggregate in aggregates.values()
@@ -220,20 +221,24 @@ class FinancialOverviewService:
             .where(IncomeForecast.company_id.in_(company_ids))
         )
         income_grouped: Dict[str, List[IncomeForecast]] = {aggregate.company.id: [] for aggregate in aggregates}
+        all_income_forecasts: List[IncomeForecast] = []
         for forecast, in self._session.execute(income_stmt):
             income_grouped.setdefault(forecast.company_id, []).append(forecast)
+            all_income_forecasts.append(forecast)
 
         expense_stmt = (
             select(ExpenseForecast)
             .where(ExpenseForecast.company_id.in_(company_ids))
         )
         expense_grouped: Dict[str, List[ExpenseForecast]] = {aggregate.company.id: [] for aggregate in aggregates}
+        all_expense_forecasts: List[ExpenseForecast] = []
         for forecast, in self._session.execute(expense_stmt):
             expense_grouped.setdefault(forecast.company_id, []).append(forecast)
+            all_expense_forecasts.append(forecast)
 
         for aggregate in aggregates:
-            aggregate.income_forecasts = income_grouped.get(aggregate.company.id, [])
-            aggregate.expense_forecasts = expense_grouped.get(aggregate.company.id, [])
+            aggregate.income_forecasts = all_income_forecasts
+            aggregate.expense_forecasts = all_expense_forecasts
 
     def _build_balance_summary(self, balance: Optional[AccountBalance]) -> Optional[BalanceSummary]:
         if not balance:
@@ -270,30 +275,36 @@ class FinancialOverviewService:
         income_forecasts: Optional[List[IncomeForecast]],
         expense_forecasts: Optional[List[ExpenseForecast]],
         as_of: date,
+        company_id: str,
     ) -> Optional[ForecastSummary]:
-        if not income_forecasts and not expense_forecasts:
-            return None
-        certain_total = 0.0
-        uncertain_total = 0.0
+        revenue_summary = self.get_revenue_summary(
+            year=as_of.year,
+            company_id=None,
+            include_forecast=True,
+            max_level=6,
+        )
+        totals = revenue_summary.totals
+        certain_total = totals.forecast_certain_total or 0.0
+        uncertain_total = totals.forecast_uncertain_total or 0.0
+        certain_monthly = totals.forecast_certain_monthly or [0.0] * 12
+        uncertain_monthly = totals.forecast_uncertain_monthly or [0.0] * 12
         income_stats: Dict[str, Dict[str, float]] = {}
-        for forecast in income_forecasts or []:
-            amt = self._to_float(forecast.expected_amount)
-            if forecast.certainty == Certainty.CERTAIN:
-                certain_total += amt
-            else:
-                uncertain_total += amt
-            if forecast.certainty in (Certainty.CERTAIN, Certainty.UNCERTAIN):
-                key = forecast.cash_in_date.strftime("%Y-%m")
-                stats = income_stats.setdefault(key, {"certain": 0.0, "uncertain": 0.0})
-                if forecast.certainty == Certainty.CERTAIN:
-                    stats["certain"] += amt
-                else:
-                    stats["uncertain"] += amt
+        for idx in range(12):
+            month_label = f"{revenue_summary.year}-{idx + 1:02d}"
+            certain_value = certain_monthly[idx] if idx < len(certain_monthly) else 0.0
+            uncertain_value = (
+                uncertain_monthly[idx] if idx < len(uncertain_monthly) else 0.0
+            )
+            if certain_value or uncertain_value:
+                income_stats[month_label] = {
+                    "certain": certain_value,
+                    "uncertain": uncertain_value,
+                }
 
+        if not income_stats and not expense_forecasts:
+            return None
         expense_monthly: Dict[str, float] = {}
         for forecast in expense_forecasts or []:
-            if forecast.cash_out_date < as_of:
-                continue
             key = forecast.cash_out_date.strftime("%Y-%m")
             expense_monthly[key] = expense_monthly.get(key, 0.0) + self._to_float(forecast.expected_amount)
 

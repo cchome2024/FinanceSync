@@ -151,17 +151,22 @@ def test_financial_overview_returns_latest_snapshot(client: TestClient) -> None:
     assert response.status_code == 200
     payload = response.json()
 
-    assert payload["companies"][0]["companyName"] == "ACME 集团"
-    balances = payload["companies"][0]["balances"]
+    company_payload = payload["companies"][0]
+    assert company_payload["companyName"] == "ACME 集团"
+    balances = company_payload["balances"]
     assert balances["total"] == 150000
 
     revenue = payload["companies"][0]["revenue"]
     assert revenue["amount"] == 88000
     assert revenue["period"] == "2025-11"
 
-    forecast = payload["companies"][0]["forecast"]
+    forecast = company_payload["forecast"]
     assert forecast["certain"] == 80000
-    assert forecast["uncertain"] == 40000
+    assert forecast["uncertain"] == 0.0
+    assert forecast["incomesMonthly"] == [
+        {"month": "2025-11", "certain": 20000.0, "uncertain": 0.0},
+        {"month": "2025-12", "certain": 60000.0, "uncertain": 0.0},
+    ]
     assert forecast["expensesMonthly"][0] == {"month": "2025-11", "amount": 25000.0}
     assert forecast["expensesMonthly"][1] == {"month": "2025-12", "amount": 18000.0}
 
@@ -174,7 +179,11 @@ def test_financial_overview_filters_by_company(client: TestClient) -> None:
     payload = response.json()
 
     assert len(payload["companies"]) == 1
-    assert payload["companies"][0]["companyId"] == "company-beta"
-    assert payload["companies"][0]["balances"]["total"] == 100000
+    company_payload = payload["companies"][0]
+    assert company_payload["companyId"] == "company-beta"
+    assert company_payload["balances"]["total"] == 100000
+    forecast = company_payload["forecast"]
+    assert forecast["certain"] == 80000
+    assert forecast["uncertain"] == 0.0
 
 
