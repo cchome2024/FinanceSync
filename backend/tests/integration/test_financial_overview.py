@@ -22,7 +22,7 @@ from app.models.financial import (
     ImportSource,
     ImportStatus,
     IncomeForecast,
-    RevenueRecord,
+    RevenueDetail,
     Certainty,
 )
 
@@ -46,7 +46,7 @@ def _seed_data():
     with db.session_scope() as session:
         session.query(IncomeForecast).delete()
         session.query(ExpenseRecord).delete()
-        session.query(RevenueRecord).delete()
+        session.query(RevenueDetail).delete()
         session.query(AccountBalance).delete()
         session.query(Company).delete()
 
@@ -81,13 +81,14 @@ def _seed_data():
                     investment_balance=20000,
                     total_balance=100000,
                 ),
-                RevenueRecord(
+                RevenueDetail(
                     company_id=acme.id,
-                     import_job_id=job.id,
-                    month=date(2025, 11, 1),
-                    category="主营收入",
+                    import_job_id=job.id,
+                    occurred_on=date(2025, 11, 5),
                     amount=88000,
                     currency="CNY",
+                    category_path_text="主营收入",
+                    category_label="主营收入",
                 ),
                 ExpenseRecord(
                     company_id=acme.id,

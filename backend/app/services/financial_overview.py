@@ -14,7 +14,7 @@ from app.models.financial import (
     ExpenseRecord,
     FinanceCategory,
     IncomeForecast,
-    RevenueRecord,
+    RevenueDetail,
     Certainty,
 )
 from app.schemas.overview import (
@@ -33,9 +33,17 @@ from app.schemas.overview import (
 class _CompanyAggregates:
     company: Company
     balance: Optional[AccountBalance] = None
-    revenue: Optional[RevenueRecord] = None
+    revenue: Optional["_RevenueMonthlySnapshot"] = None
     expense: Optional[ExpenseRecord] = None
     forecasts: List[IncomeForecast] = None
+
+
+@dataclass
+class _RevenueMonthlySnapshot:
+    company_id: str
+    period: date
+    amount: Decimal
+    currency: str
 
 
 class FinancialOverviewService:
@@ -113,16 +121,58 @@ class FinancialOverviewService:
         if not company_ids:
             return
 
+        month_expr = func.strftime('%Y-%m-01', RevenueDetail.occurred_on).label("period_start")
         stmt = (
-            select(RevenueRecord)
-            .where(RevenueRecord.company_id.in_(company_ids))
-            .where(RevenueRecord.month <= as_of)
-            .order_by(RevenueRecord.company_id, RevenueRecord.month.desc())
+            select(
+                RevenueDetail.company_id,
+                month_expr,
+                func.sum(RevenueDetail.amount).label("total_amount"),
+                func.max(RevenueDetail.currency).label("currency"),
+            )
+            .where(RevenueDetail.company_id.in_(company_ids))
+            .where(RevenueDetail.occurred_on <= as_of)
+            .group_by(RevenueDetail.company_id, month_expr)
+            .order_by(RevenueDetail.company_id, month_expr.desc())
         )
-        latest: Dict[str, RevenueRecord] = {}
-        for record, in self._session.execute(stmt):
-            if record.company_id not in latest:
-                latest[record.company_id] = record
+        latest: Dict[str, _RevenueMonthlySnapshot] = {}
+        for row in self._session.execute(stmt):
+            company_id_value: str = row[0]
+            period_str: str = row[1]
+            total_amount: Decimal = row[2] or Decimal(0)
+            currency: str = row[3] or "CNY"
+            if company_id_value not in latest:
+                latest[company_id_value] = _RevenueMonthlySnapshot(
+                    company_id=company_id_value,
+                    period=date.fromisoformat(period_str),
+                    amount=total_amount,
+                    currency=currency,
+                )
+
+        missing_ids = [cid for cid in company_ids if cid not in latest]
+        if missing_ids:
+            fallback_stmt = (
+                select(
+                    RevenueDetail.company_id,
+                    month_expr,
+                    func.sum(RevenueDetail.amount).label("total_amount"),
+                    func.max(RevenueDetail.currency).label("currency"),
+                )
+                .where(RevenueDetail.company_id.in_(missing_ids))
+                .group_by(RevenueDetail.company_id, month_expr)
+                .order_by(RevenueDetail.company_id, month_expr.desc())
+            )
+            for row in self._session.execute(fallback_stmt):
+                company_id_value: str = row[0]
+                period_str: str = row[1]
+                total_amount: Decimal = row[2] or Decimal(0)
+                currency: str = row[3] or "CNY"
+                if company_id_value not in latest:
+                    latest[company_id_value] = _RevenueMonthlySnapshot(
+                        company_id=company_id_value,
+                        period=date.fromisoformat(period_str),
+                        amount=total_amount,
+                        currency=currency,
+                    )
 
         for aggregate in aggregates:
             aggregate.revenue = latest.get(aggregate.company.id)
@@ -170,17 +220,28 @@ class FinancialOverviewService:
             cash=self._to_float(balance.cash_balance),
             investment=self._to_float(balance.investment_balance),
             total=self._to_float(balance.total_balance),
+            reported_at=balance.reported_at.date().isoformat(),
         )
 
-    def _build_flow_summary(self, record: Optional[RevenueRecord | ExpenseRecord]) -> Optional[FlowSummary]:
+    def _build_flow_summary(
+        self,
+        record: Optional[_RevenueMonthlySnapshot | ExpenseRecord],
+    ) -> Optional[FlowSummary]:
         if not record:
             return None
-        period = record.month.strftime("%Y-%m")
-        currency = getattr(record, "currency", "CNY")
-        amount_value = getattr(record, "amount", None)
+
+        if isinstance(record, _RevenueMonthlySnapshot):
+            period_str = record.period.strftime("%Y-%m")
+            amount_value = record.amount
+            currency = record.currency
+        else:
+            period_str = record.month.strftime("%Y-%m")
+            currency = getattr(record, "currency", "CNY")
+            amount_value = getattr(record, "amount", None)
+
         if amount_value is None:
             return None
-        return FlowSummary(period=period, amount=self._to_float(amount_value), currency=currency)
+        return FlowSummary(period=period_str, amount=self._to_float(amount_value), currency=currency)
 
     def _build_forecast_summary(self, forecasts: Optional[List[IncomeForecast]]) -> Optional[ForecastSummary]:
         if not forecasts:
@@ -220,17 +281,22 @@ class FinancialOverviewService:
             )
         return history
 
-    def get_revenue_summary(self, year: Optional[int] = None, company_id: Optional[str] = None) -> RevenueSummaryResponse:
+    def get_revenue_summary(
+        self,
+        year: Optional[int] = None,
+        company_id: Optional[str] = None,
+        max_level: Optional[int] = None,
+    ) -> RevenueSummaryResponse:
         if year is None:
             year = datetime.now(UTC).year
 
         stmt = (
-            select(RevenueRecord, FinanceCategory)
-            .outerjoin(FinanceCategory, RevenueRecord.category_ref)
-            .where(func.strftime('%Y', RevenueRecord.month) == str(year))
+            select(RevenueDetail, FinanceCategory)
+            .outerjoin(FinanceCategory, RevenueDetail.category_ref)
+            .where(func.strftime('%Y', RevenueDetail.occurred_on) == str(year))
         )
         if company_id:
-            stmt = stmt.where(RevenueRecord.company_id == company_id)
+            stmt = stmt.where(RevenueDetail.company_id == company_id)
 
         results = self._session.execute(stmt).all()
 
@@ -242,6 +308,8 @@ class FinancialOverviewService:
                 nodes=[],
             )
 
+        if max_level is None or max_level < 1:
+            max_level = 2
         totals_by_path: Dict[Tuple[str, ...], List[float]] = {}
         totals_sum: Dict[Tuple[str, ...], float] = {}
         root_order: List[Tuple[str, ...]] = []
@@ -257,17 +325,26 @@ class FinancialOverviewService:
             if child not in children:
                 children.append(child)
 
-        for record, category in results:
-            amount = self._to_float(record.amount)
-            month_idx = record.month.month - 1
+        for detail, category in results:
+            amount = self._to_float(detail.amount)
+            month_idx = detail.occurred_on.month - 1
 
             if category and category.full_path:
                 path_segments = [segment for segment in category.full_path.split('/') if segment]
+            elif detail.category_path_text:
+                path_segments = [segment for segment in detail.category_path_text.split('/') if segment]
             else:
-                path_segments = [segment for segment in [record.category, record.subcategory] if segment]
+                path_segments = [
+                    segment
+                    for segment in [
+                        detail.category_label,
+                        detail.subcategory_label,
+                    ]
+                    if segment
+                ]
 
             if not path_segments:
-                path_segments = ['未分类']
+                path_segments = ["未分类"]
 
             tuple_path = tuple(path_segments)
 
@@ -284,11 +361,19 @@ class FinancialOverviewService:
                     add_child(parent, subpath)
 
         def build_node(path: Tuple[str, ...]) -> RevenueSummaryNode:
-            children = [build_node(child) for child in children_order.get(path, [])]
+            level = len(path)
+            if level >= max_level:
+                children_paths: List[Tuple[str, ...]] = []
+            else:
+                children_paths = [
+                    child for child in children_order.get(path, []) if len(child) <= max_level
+                ]
+            children = [build_node(child) for child in children_paths]
             monthly = [round(value, 2) for value in totals_by_path[path]]
             total_value = round(totals_sum[path], 2)
             return RevenueSummaryNode(
                 label=path[-1],
+                level=level,
                 monthly=monthly,
                 total=total_value,
                 children=children,

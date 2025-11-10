@@ -74,6 +74,7 @@ class FinanceCategory(Base):
     children: Mapped[list["FinanceCategory"]] = relationship(back_populates="parent")
 
     revenue_records: Mapped[list["RevenueRecord"]] = relationship(back_populates="category_ref")
+    revenue_details: Mapped[list["RevenueDetail"]] = relationship(back_populates="category_ref")
     expense_records: Mapped[list["ExpenseRecord"]] = relationship(back_populates="category_ref")
     income_forecasts: Mapped[list["IncomeForecast"]] = relationship(back_populates="category_ref")
 
@@ -92,6 +93,7 @@ class Company(Base):
 
     account_balances: Mapped[list["AccountBalance"]] = relationship(back_populates="company")
     revenue_records: Mapped[list["RevenueRecord"]] = relationship(back_populates="company")
+    revenue_details: Mapped[list["RevenueDetail"]] = relationship(back_populates="company")
     expense_records: Mapped[list["ExpenseRecord"]] = relationship(back_populates="company")
     income_forecasts: Mapped[list["IncomeForecast"]] = relationship(back_populates="company")
 
@@ -167,6 +169,42 @@ class RevenueRecord(Base):
     company: Mapped[Company] = relationship(back_populates="revenue_records")
     import_job: Mapped[ImportJob] = relationship()
     category_ref: Mapped[Optional["FinanceCategory"]] = relationship(back_populates="revenue_records")
+
+
+class RevenueDetail(Base):
+    __tablename__ = "revenue_details"
+    __table_args__ = (
+        UniqueConstraint(
+            "company_id",
+            "occurred_on",
+            "amount",
+            "category_id",
+            "description",
+            "account_name",
+            name="uq_revenue_detail_natural_key",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    company_id: Mapped[str] = mapped_column(String(36), ForeignKey("companies.id"), nullable=False)
+    import_job_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("import_jobs.id"))
+    category_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("finance_categories.id"))
+    occurred_on: Mapped[date] = mapped_column(Date, nullable=False)
+    amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(8), default="CNY")
+    description: Mapped[str | None] = mapped_column(String(255))
+    account_name: Mapped[str | None] = mapped_column(String(64))
+    category_path_text: Mapped[str | None] = mapped_column(String(512))
+    category_label: Mapped[str | None] = mapped_column(String(128))
+    subcategory_label: Mapped[str | None] = mapped_column(String(128))
+    confidence: Mapped[float | None] = mapped_column(Float)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    company: Mapped[Company] = relationship(back_populates="revenue_details")
+    import_job: Mapped[ImportJob] = relationship()
+    category_ref: Mapped[Optional["FinanceCategory"]] = relationship(back_populates="revenue_details")
 
 
 class ExpenseRecord(Base):

@@ -249,12 +249,16 @@ export default function AIChatScreen() {
           const conflict = detail?.conflict ?? {}
           const companyName = (conflict.companyId as string | undefined) || '该公司'
           const recordType = detail?.recordType ?? 'record'
-          const month = (conflict.month as string | undefined) || (conflict.reportedAt as string | undefined)
+          const period =
+            (conflict.occurredOn as string | undefined) ||
+            (conflict.month as string | undefined) ||
+            (conflict.reportedAt as string | undefined)
           const category = (conflict.category as string | undefined) || (conflict.categoryPath as string | undefined)
           const subcategory = conflict.subcategory as string | undefined
+          const detailDescription = conflict.description as string | undefined
           const parts: string[] = [companyName]
-          if (month) {
-            parts.push(month)
+          if (period) {
+            parts.push(period)
           }
           if (recordType === 'revenue') {
             if (category) {
@@ -263,12 +267,15 @@ export default function AIChatScreen() {
             if (subcategory) {
               parts.push(subcategory)
             }
+            if (detailDescription) {
+              parts.push(detailDescription)
+            }
           }
-          const description = parts.join(' / ')
+          const summaryText = parts.join(' / ')
           const bannerMessage =
             recordType === 'revenue'
-              ? `${description} 已存在收入记录，点击“覆盖入库”确认是否覆盖。`
-              : `${description} 已存在记录，点击“覆盖入库”确认是否覆盖。`
+              ? `${summaryText} 已存在收入记录，点击“覆盖入库”确认是否覆盖。`
+              : `${summaryText} 已存在记录，点击“覆盖入库”确认是否覆盖。`
 
           setPendingOverwriteMessage(bannerMessage)
           addImportMessage({

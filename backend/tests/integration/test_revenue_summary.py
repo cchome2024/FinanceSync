@@ -2,14 +2,20 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+import sys
 
 import pytest
 from fastapi.testclient import TestClient
 
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
 from app import db
 from app.main import create_app
 from app.models.base import Base
-from app.models.financial import CategoryType, Company, FinanceCategory, RevenueRecord, ImportJob, ImportSource, ImportStatus
+from app.models.financial import CategoryType, Company, FinanceCategory, RevenueDetail, ImportJob, ImportSource, ImportStatus
 
 
 @pytest.fixture(name="client")
@@ -60,32 +66,46 @@ def _seed_data() -> None:
 
         session.add_all(
             [
-                RevenueRecord(
+                RevenueDetail(
                     company_id=company.id,
                     import_job_id=import_job.id,
                     category_id=child.id,
-                    month=date(2024, 1, 1),
-                    category="报告服务",
-                    subcategory=None,
+                    occurred_on=date(2024, 1, 6),
                     amount=100,
+                    currency="CNY",
+                    category_path_text="互联网基金服务/报告服务",
+                    category_label="报告服务",
                 ),
-                RevenueRecord(
+                RevenueDetail(
                     company_id=company.id,
                     import_job_id=import_job.id,
                     category_id=child.id,
-                    month=date(2024, 2, 1),
-                    category="报告服务",
-                    subcategory=None,
+                    occurred_on=date(2024, 2, 12),
                     amount=200,
+                    currency="CNY",
+                    category_path_text="互联网基金服务/报告服务",
+                    category_label="报告服务",
                 ),
-                RevenueRecord(
+                RevenueDetail(
                     company_id=company.id,
                     import_job_id=import_job.id,
                     category_id=None,
-                    month=date(2024, 3, 1),
-                    category="培训服务",
-                    subcategory="合作培训",
+                    occurred_on=date(2024, 2, 25),
+                    amount=30,
+                    currency="CNY",
+                    category_path_text="互联网基金服务/报告服务/专项项目",
+                    category_label="报告服务",
+                    subcategory_label="专项项目",
+                ),
+                RevenueDetail(
+                    company_id=company.id,
+                    import_job_id=import_job.id,
+                    category_id=None,
+                    occurred_on=date(2024, 3, 20),
                     amount=50,
+                    currency="CNY",
+                    category_label="培训服务",
+                    subcategory_label="合作培训",
                 ),
             ]
         )
@@ -99,21 +119,35 @@ def test_revenue_summary_returns_hierarchy(client: TestClient) -> None:
     payload = response.json()
 
     assert payload["year"] == 2024
-    assert payload["totals"]["total"] == 350.0
+    assert payload["totals"]["total"] == 380.0
     assert payload["totals"]["monthly"][0] == 100.0
-    assert payload["totals"]["monthly"][1] == 200.0
+    assert payload["totals"]["monthly"][1] == 230.0
     assert payload["totals"]["monthly"][2] == 50.0
 
     nodes = payload["nodes"]
     assert len(nodes) == 2
 
     internet_services = next(node for node in nodes if node["label"] == "互联网基金服务")
-    assert internet_services["total"] == 300.0
+    assert internet_services["level"] == 1
+    assert internet_services["total"] == 330.0
     assert internet_services["monthly"][0] == 100.0
-    assert internet_services["monthly"][1] == 200.0
-    assert internet_services["children"][0]["label"] == "报告服务"
+    assert internet_services["monthly"][1] == 230.0
+    report_services = internet_services["children"][0]
+    assert report_services["label"] == "报告服务"
+    assert report_services["level"] == 2
+    assert report_services["children"] == []
 
     training = next(node for node in nodes if node["label"] == "培训服务")
+    assert training["level"] == 1
     assert training["total"] == 50.0
     assert training["monthly"][2] == 50.0
     assert training["children"][0]["label"] == "合作培训"
+
+    # 请求更深层级
+    response_full = client.get("/api/v1/financial/revenue-summary", params={"year": 2024, "maxLevel": 3})
+    assert response_full.status_code == 200
+    payload_full = response_full.json()
+    nodes_full = payload_full["nodes"]
+    internet_services_full = next(node for node in nodes_full if node["label"] == "互联网基金服务")
+    report_full = next(child for child in internet_services_full["children"] if child["label"] == "报告服务")
+    assert any(child["label"] == "专项项目" for child in report_full["children"])

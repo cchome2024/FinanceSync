@@ -3,7 +3,6 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect } from 'expo-router'
 
-import FinancialTrends, { TrendDatum } from '@/components/charts/FinancialTrends'
 import { apiClient } from '@/src/services/apiClient'
 import { NavLink } from '@/components/common/NavLink'
 
@@ -11,6 +10,7 @@ type BalanceSummary = {
   cash: number
   investment: number
   total: number
+  reportedAt: string
 }
 
 type FlowSummary = {
@@ -40,6 +40,7 @@ type FinancialOverviewResponse = {
 
 type RevenueSummaryNode = {
   label: string
+  level: number
   monthly: number[]
   total: number
   children?: RevenueSummaryNode[]
@@ -61,6 +62,7 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(false)
   const [revenueSummary, setRevenueSummary] = useState<RevenueSummaryResponse | null>(null)
   const [revenueYear, setRevenueYear] = useState(new Date().getFullYear())
+  const [revenueLevel, setRevenueLevel] = useState(2)
   const [loadingRevenue, setLoadingRevenue] = useState(false)
 
   const loadOverview = useCallback(async () => {
@@ -84,7 +86,7 @@ export default function DashboardScreen() {
   const loadRevenueSummary = useCallback(async () => {
     setLoadingRevenue(true)
     try {
-      const params: Record<string, string> = { year: String(revenueYear) }
+      const params: Record<string, string> = { year: String(revenueYear), maxLevel: String(revenueLevel) }
       if (companyId) {
         params.companyId = companyId
       }
@@ -97,7 +99,7 @@ export default function DashboardScreen() {
     } finally {
       setLoadingRevenue(false)
     }
-  }, [companyId, revenueYear])
+  }, [companyId, revenueYear, revenueLevel])
 
   useEffect(() => {
     loadOverview()
@@ -120,24 +122,6 @@ useFocusEffect(
     return companies.find((item) => item.companyId === companyId) ?? companies[0]
   }, [companies, companyId])
 
-  const revenueVsExpense: TrendDatum[] = useMemo(() => {
-    if (!currentCompany) {
-      return []
-    }
-    const values: TrendDatum[] = []
-    if (currentCompany.revenue) {
-      values.push({ label: `收入(${currentCompany.revenue.period})`, value: currentCompany.revenue.amount })
-    }
-    if (currentCompany.expense) {
-      values.push({ label: `支出(${currentCompany.expense.period})`, value: currentCompany.expense.amount })
-    }
-    if (currentCompany.forecast) {
-      values.push({ label: '确定预期', value: currentCompany.forecast.certain })
-      values.push({ label: '非确定预期', value: currentCompany.forecast.uncertain })
-    }
-    return values
-  }, [currentCompany])
-
   const currentYear = useMemo(() => new Date().getFullYear(), [])
   const yearOptions = useMemo(() => [currentYear, currentYear - 1, currentYear - 2], [currentYear])
 
@@ -148,12 +132,13 @@ useFocusEffect(
 
     const rows: Array<{ key: string; label: string; depth: number; monthly: number[]; total: number }> = []
 
-    const traverse = (nodes: RevenueSummaryNode[], depth = 0, parentKey = '') => {
+    const traverse = (nodes: RevenueSummaryNode[], parentKey = '') => {
       nodes.forEach((node, index) => {
         const key = `${parentKey}${node.label}-${index}`
+        const depth = Math.max(0, node.level - 1)
         rows.push({ key, label: node.label, depth, monthly: node.monthly, total: node.total })
         if (node.children && node.children.length > 0) {
-          traverse(node.children, depth + 1, `${key}>`)
+          traverse(node.children, `${key}>`)
         }
       })
     }
@@ -163,7 +148,13 @@ useFocusEffect(
   }, [revenueSummary])
 
   const formatAmount = useCallback((value: number) => {
-    return value === 0 ? '' : value.toFixed(2)
+    if (value === 0) {
+      return ''
+    }
+    return (value / 10000).toLocaleString('zh-CN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
   }, [])
 
   return (
@@ -217,6 +208,7 @@ useFocusEffect(
                 <Text style={styles.cardTitle}>账户余额</Text>
                 {currentCompany.balances ? (
                   <>
+                    <Text style={styles.cardMeta}>截至 {currentCompany.balances.reportedAt}</Text>
                     <Text style={styles.cardMetric}>{currentCompany.balances.total.toLocaleString()} 元</Text>
                     <Text style={styles.cardDetail}>
                       现金 {currentCompany.balances.cash.toLocaleString()} · 理财{' '}
@@ -248,22 +240,34 @@ useFocusEffect(
             </View>
           )}
 
-          {!loading && <FinancialTrends title="收入 / 支出 / 预期对比" data={revenueVsExpense} />}
-
           <View style={styles.revenueSection}>
             <View style={styles.revenueHeader}>
               <Text style={styles.sectionTitle}>收入汇总</Text>
-              <View style={styles.yearSelector}>
-                {yearOptions.map((year) => (
-                  <TouchableOpacity
-                    key={year}
-                    style={[styles.yearChip, revenueYear === year && styles.yearChipActive]}
-                    onPress={() => setRevenueYear(year)}
-                    disabled={loadingRevenue}
-                  >
-                    <Text style={revenueYear === year ? styles.yearChipTextActive : styles.yearChipText}>{year} 年</Text>
-                  </TouchableOpacity>
-                ))}
+              <View style={styles.revenueControls}>
+                <View style={styles.yearSelector}>
+                  {yearOptions.map((year) => (
+                    <TouchableOpacity
+                      key={year}
+                      style={[styles.yearChip, revenueYear === year && styles.yearChipActive]}
+                      onPress={() => setRevenueYear(year)}
+                      disabled={loadingRevenue}
+                    >
+                      <Text style={revenueYear === year ? styles.yearChipTextActive : styles.yearChipText}>{year} 年</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <View style={styles.levelSelector}>
+                  {[1, 2, 3].map((level) => (
+                    <TouchableOpacity
+                      key={level}
+                      style={[styles.levelChip, revenueLevel === level && styles.levelChipActive]}
+                      onPress={() => setRevenueLevel(level)}
+                      disabled={loadingRevenue}
+                    >
+                      <Text style={revenueLevel === level ? styles.levelChipTextActive : styles.levelChipText}>{`${level} 级`}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </View>
             </View>
             {loadingRevenue && (
@@ -275,6 +279,7 @@ useFocusEffect(
             {!loadingRevenue && revenueSummary && revenueRows.length > 0 && (
               <ScrollView horizontal style={styles.revenueTableContainer}>
                 <View>
+                  <Text style={styles.unitHint}>单位：万元</Text>
                   <View style={[styles.tableRow, styles.tableHeaderRow]}>
                     <Text style={[styles.tableHeaderCell, styles.labelColumn]}>分类</Text>
                     {Array.from({ length: 12 }, (_, index) => (
@@ -404,6 +409,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 6,
   },
+  cardMeta: {
+    color: '#CBD5F5',
+    fontSize: 12,
+    marginBottom: 6,
+  },
   cardMetric: {
     color: '#F8FAFC',
     fontSize: 18,
@@ -438,6 +448,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 12,
+  },
+  revenueControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   sectionTitle: {
     color: '#FFFFFF',
@@ -446,7 +462,7 @@ const styles = StyleSheet.create({
   },
   yearSelector: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
   },
   yearChip: {
     borderRadius: 999,
@@ -468,9 +484,40 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
+  levelSelector: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  levelChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(148, 163, 184, 0.4)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(148, 163, 184, 0.12)',
+  },
+  levelChipActive: {
+    backgroundColor: '#38BDF8',
+    borderColor: '#38BDF8',
+  },
+  levelChipText: {
+    color: '#94A3B8',
+    fontSize: 12,
+  },
+  levelChipTextActive: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   revenueTableContainer: {
     borderRadius: 12,
     overflow: 'hidden',
+  },
+  unitHint: {
+    color: '#94A3B8',
+    fontSize: 12,
+    marginBottom: 6,
+    paddingLeft: 12,
   },
   tableRow: {
     flexDirection: 'row',

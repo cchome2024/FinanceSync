@@ -5,10 +5,10 @@
 | 实体 | 描述 | 关键关系 |
 |------|------|----------|
 | AccountBalance | 各公司账户在特定时间点的余额与理财金额快照 | 属于 Company；由 ImportJob 生成 |
-| RevenueRecord | 收入明细，按大类/子类/月份记录 | 属于 Company；关联 ImportJob |
+| RevenueDetail | 收入明细原子记录，按发生日期与多级分类存储 | 属于 Company；关联 ImportJob |
 | ExpenseRecord | 支出明细，按大类/月份记录 | 属于 Company；关联 ImportJob |
-| IncomeForecast | 收入预测，包含确定性/非确定性、资管产品维度 | 属于 Company；可引用 RevenueRecord 以便对比 |
-| ImportJob | 描述一次 AI 导入任务（上传或目录监控）及状态 | 关联多条 AccountBalance/RevenueRecord/ExpenseRecord/IncomeForecast |
+| IncomeForecast | 收入预测，包含确定性/非确定性、资管产品维度 | 属于 Company；可与 RevenueDetail 做对比 |
+| ImportJob | 描述一次 AI 导入任务（上传或目录监控）及状态 | 关联多条 AccountBalance/RevenueDetail/ExpenseRecord/IncomeForecast |
 | ConfirmationLog | 记录用户或 AI 的确认操作、修改意见 | 关联 ImportJob 与具体财务记录 |
 | NlqQuery | 自然语言问题及执行结果快照 | 可引用生成的报表或图表配置 |
 | Company | 公司主体或账户归属信息 | 与所有财务数据实体关联 |
@@ -19,7 +19,7 @@
 ### Company
 - **字段**: `id`, `name`, `display_name`, `currency`, `created_at`, `updated_at`
 - **约束**: `name` 唯一；默认币种为 CNY。
-- **关系**: `has_many` AccountBalance/RevenueRecord/ExpenseRecord/IncomeForecast。
+- **关系**: `has_many` AccountBalance/RevenueDetail/ExpenseRecord/IncomeForecast。
 
 ### ImportJob
 - **字段**: `id`, `source_type` (manual_upload / watched_dir / ai_chat), `status` (pending_review / approved / rejected / failed), `initiator_id`, `initiator_role`, `llm_model`, `confidence_score`, `started_at`, `completed_at`, `raw_payload_ref`, `error_log`
@@ -34,9 +34,10 @@
 - **字段**: `id`, `company_id`, `import_job_id`, `reported_at`, `cash_balance`, `investment_balance`, `total_balance`, `currency`, `notes`
 - **验证**: 金额字段需为非负数；`total_balance = cash_balance + investment_balance`。
 
-### RevenueRecord
-- **字段**: `id`, `company_id`, `import_job_id`, `month`, `category`, `subcategory`, `amount`, `currency`, `confidence`, `notes`
-- **验证**: `month` 采用 `YYYY-MM`；`category`/`subcategory` 来自字典；`confidence` 0-1。
+### RevenueDetail
+- **字段**: `id`, `company_id`, `import_job_id`, `occurred_on`, `amount`, `currency`, `category_id`, `category_path_text`, `category_label`, `subcategory_label`, `description`, `account_name`, `confidence`, `notes`, `created_at`, `updated_at`
+- **验证**: `occurred_on` 使用 ISO 日期；金额以人民币“元”为单位；`category_path_text` 记录原始多级分类（如 “资管/自主募集/管理费”）；`category_id` 自动与 `FinanceCategory` 对应；置信度 0-1。
+- **说明**: 所有收入汇总（按月份、按分类）均通过 `RevenueDetail` 聚合计算，不再由人工直接录入汇总值。
 
 ### ExpenseRecord
 - **字段**: `id`, `company_id`, `import_job_id`, `month`, `category`, `amount`, `currency`, `confidence`, `notes`

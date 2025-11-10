@@ -149,7 +149,7 @@ class LLMClient:
             "  - `income_forecast`: 未来收入预测。\n"
             "- `payload`: 对应记录的详细字段。不同 record_type 需要的字段如下：\n"
             "  * account_balance: `company_id`(字符串，若未知留空), `reported_at`(ISO8601日期时间), `cash_balance`(数字), `investment_balance`(数字, 可为0), `total_balance`(数字), `currency`(字符串, 缺省填 \"CNY\"), `notes`(可选字符串)。\n"
-            "  * revenue: `company_id`, `month`(YYYY-MM-DD, 使用当月1日), `category`(字符串), `subcategory`(可选字符串), `amount`(数字), `currency`(默认 \"CNY\"), `confidence`(可选0-1小数), `notes`(可选)。\n"
+            "  * revenue: `company_id`, `occurred_on`(YYYY-MM-DD), `amount`(数字，单位为人民币元，若原始数据以“万元”等需要先换算成元), `currency`(默认 \"CNY\"), `category_path`(数组或\"大类/二类/...\" 字符串，表示收入分类层级), `description`(可选，款项内容或备注), `account_name`(可选到账账户), `confidence`(可选0-1小数), `notes`(可选)。\n"
             "  * expense: `company_id`, `month`, `category`, `amount`, `currency`(默认 \"CNY\"), `confidence`(可选), `notes`(可选)。\n"
             "  * income_forecast: `company_id`, `cash_in_date`(YYYY-MM-DD), `product_line`(可选), `product_name`(可选), `certainty`(枚举 `certain` 或 `uncertain`), `category`(可选字符串), `expected_amount`(数字), `currency`(默认 \"CNY\"), `confidence`(可选), `notes`(可选)。\n"
             "- `confidence`: 可选，若给出需为 0-1 之间的小数。\n"

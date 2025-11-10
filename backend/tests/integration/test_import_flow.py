@@ -16,7 +16,7 @@ from app import db
 from app.api.deps import get_ai_parser, get_import_job_repository, get_storage_adapter
 from app.main import create_app
 from app.models.base import Base
-from app.models.financial import Company, RevenueRecord
+from app.models.financial import Company, RevenueDetail
 from app.repositories.import_jobs import ImportJobRepository
 from app.schemas.imports import CandidateRecord, RecordType
 
@@ -34,8 +34,8 @@ class MemoryStorage:
 
 
 class FakeParser:
-    def __init__(self, month: str, amount: float) -> None:
-        self._month = month
+    def __init__(self, occurred_on: str, amount: float) -> None:
+        self._occurred_on = occurred_on
         self._amount = amount
 
     async def parse_prompt(self, prompt: str, attachments: Iterable[bytes]) -> tuple[list[CandidateRecord], dict]:
@@ -43,9 +43,11 @@ class FakeParser:
             CandidateRecord(
                 record_type=RecordType.REVENUE,
                 payload={
-                    "month": self._month,
-                    "category": "主营业务收入",
-                    "category_path": ["主营业务收入"],
+                    "occurred_on": self._occurred_on,
+                    "category_path": ["主营业务收入", "产品销售"],
+                    "category": "产品销售",
+                    "description": "测试收入",
+                    "account_name": "基本户",
                     "amount": self._amount,
                     "currency": "CNY",
                 },
@@ -62,7 +64,7 @@ def client_fixture(tmp_path) -> TestClient:
     Base.metadata.create_all(bind=db.engine)
 
     app = create_app()
-    parser = FakeParser(month="2025-02-01", amount=123456.78)
+    parser = FakeParser(occurred_on="2025-02-10", amount=123456.78)
     app.state.fake_parser = parser
 
     async def override_parser() -> FakeParser:
@@ -129,12 +131,13 @@ def test_parse_and_confirm_flow(client: TestClient) -> None:
     assert confirm_payload["rejectedCount"] == 0
 
     with db.session_scope() as verify_session:
-        records: list[RevenueRecord] = (
-            verify_session.query(RevenueRecord).filter_by(company_id=company_id).all()
+        records: list[RevenueDetail] = (
+            verify_session.query(RevenueDetail).filter_by(company_id=company_id).all()
         )
         assert len(records) == 1
         assert float(records[0].amount) == 123456.78
         assert records[0].category_id is not None
+        assert records[0].occurred_on.isoformat() == "2025-02-10"
 
 
 def test_confirm_revenue_requires_overwrite(client: TestClient) -> None:
@@ -199,7 +202,7 @@ def test_confirm_revenue_requires_overwrite(client: TestClient) -> None:
     assert conflict_response.status_code == 409
     detail = conflict_response.json()["detail"]
     assert detail["recordType"] == "revenue"
-    assert detail["conflict"]["month"].startswith("2025-02-01")
+    assert detail["conflict"]["occurredOn"].startswith("2025-02-10")
 
     # 带 overwrite 的确认应成功
     overwrite_response = client.post(
@@ -221,9 +224,9 @@ def test_confirm_revenue_requires_overwrite(client: TestClient) -> None:
 
     with db.session_scope() as session:
         records = (
-            session.query(RevenueRecord)
+            session.query(RevenueDetail)
             .filter_by(company_id=company_id)
-            .order_by(RevenueRecord.month)
+            .order_by(RevenueDetail.occurred_on)
             .all()
         )
         assert len(records) == 1

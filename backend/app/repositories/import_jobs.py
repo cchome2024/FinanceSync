@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import Any, Dict, Iterable, Sequence
 
 from sqlalchemy import select
@@ -17,7 +18,7 @@ from app.models.financial import (
     ImportSource,
     ImportStatus,
     IncomeForecast,
-    RevenueRecord,
+    RevenueDetail,
     Company,
     CategoryType,
 )
@@ -213,58 +214,98 @@ class ImportJobRepository:
                 notes=payload.get("notes"),
             )
         elif record_type is RecordType.REVENUE:
+            company_id = self._resolve_company_id(payload)
+            raw_occurred = payload.get("occurred_on") or payload.get("occurredOn") or payload.get("date")
+            if not raw_occurred:
+                raise ValueError("Revenue detail missing occurred_on/date field")
+            occurred_on = _as_date(raw_occurred)
+            payload["occurred_on"] = occurred_on.isoformat()
+
             category_id = self._ensure_category(
                 payload,
                 CategoryType.REVENUE,
-                fallback_keys=["category", "subcategory"],
+                fallback_keys=[
+                    "category",
+                    "subcategory",
+                    "category_level1",
+                    "categoryLevel1",
+                    "category_level2",
+                    "categoryLevel2",
+                ],
             )
-            company_id = self._resolve_company_id(payload)
-            month = _as_date(payload["month"])
 
-            stmt = select(RevenueRecord).where(
-                RevenueRecord.company_id == company_id,
-                RevenueRecord.month == month,
+            amount_raw = payload.get("amount")
+            if amount_raw is None:
+                raise ValueError("Revenue detail missing amount")
+            amount_value = Decimal(str(amount_raw))
+            payload["amount"] = float(amount_value)
+
+            description = (payload.get("description") or payload.get("item") or payload.get("item_name") or "").strip() or None
+            account_name = (payload.get("account_name") or payload.get("account") or payload.get("accountName") or "").strip() or None
+            category_text = payload.get("category_path_text") or payload.get("category")
+            category_label = payload.get("category")
+            subcategory_label = payload.get("subcategory")
+
+            stmt = select(RevenueDetail).where(
+                RevenueDetail.company_id == company_id,
+                RevenueDetail.occurred_on == occurred_on,
             )
             if category_id:
-                stmt = stmt.where(RevenueRecord.category_id == category_id)
+                stmt = stmt.where(RevenueDetail.category_id == category_id)
             else:
-                stmt = stmt.where(RevenueRecord.category == payload.get("category", ""))
-                if payload.get("subcategory") is None:
-                    stmt = stmt.where(RevenueRecord.subcategory.is_(None))
-                else:
-                    stmt = stmt.where(RevenueRecord.subcategory == payload.get("subcategory"))
+                stmt = stmt.where(RevenueDetail.category_path_text == category_text)
+            if description:
+                stmt = stmt.where(RevenueDetail.description == description)
+            else:
+                stmt = stmt.where(RevenueDetail.description.is_(None))
+            if account_name:
+                stmt = stmt.where(RevenueDetail.account_name == account_name)
+            else:
+                stmt = stmt.where(RevenueDetail.account_name.is_(None))
+            stmt = stmt.where(RevenueDetail.amount == amount_value)
 
-            existing_revenue = self.session.execute(stmt).scalar_one_or_none()
+            existing_detail = self.session.execute(stmt).scalar_one_or_none()
             conflict_info = {
                 "companyId": company_id,
-                "month": month.isoformat(),
+                "occurredOn": occurred_on.isoformat(),
                 "category": payload.get("category"),
-                "subcategory": payload.get("subcategory"),
+                "categoryPath": payload.get("category_path_text"),
+                "categoryLabel": category_label,
+                "subcategory": subcategory_label,
+                "description": description,
+                "accountName": account_name,
+                "amount": float(amount_value),
             }
 
-            if existing_revenue:
+            if existing_detail:
                 if not overwrite:
                     raise DuplicateRecordError(record_type, conflict_info)
-                existing_revenue.import_job_id = job.id
-                existing_revenue.category_id = category_id or existing_revenue.category_id
-                existing_revenue.category = payload.get("category", existing_revenue.category)
-                existing_revenue.subcategory = payload.get("subcategory", existing_revenue.subcategory)
-                existing_revenue.amount = payload.get("amount", existing_revenue.amount)
-                existing_revenue.currency = payload.get("currency", existing_revenue.currency)
-                existing_revenue.confidence = payload.get("confidence", existing_revenue.confidence)
-                existing_revenue.notes = payload.get("notes", existing_revenue.notes)
+                existing_detail.import_job_id = job.id
+                existing_detail.category_id = category_id or existing_detail.category_id
+                existing_detail.category_path_text = category_text or existing_detail.category_path_text
+                existing_detail.category_label = category_label or existing_detail.category_label
+                existing_detail.subcategory_label = subcategory_label or existing_detail.subcategory_label
+                existing_detail.amount = amount_value
+                existing_detail.currency = payload.get("currency", existing_detail.currency)
+                existing_detail.description = description
+                existing_detail.account_name = account_name
+                existing_detail.confidence = payload.get("confidence", existing_detail.confidence)
+                existing_detail.notes = payload.get("notes", existing_detail.notes)
                 self._session.flush()
-                return existing_revenue.id
+                return existing_detail.id
 
-            record = RevenueRecord(
+            record = RevenueDetail(
                 company_id=company_id,
                 import_job_id=job.id,
                 category_id=category_id,
-                month=month,
-                category=payload.get("category", ""),
-                subcategory=payload.get("subcategory"),
-                amount=payload.get("amount", 0),
+                occurred_on=occurred_on,
+                amount=amount_value,
                 currency=payload.get("currency", "CNY"),
+                description=description,
+                account_name=account_name,
+                category_path_text=category_text,
+                category_label=category_label,
+                subcategory_label=subcategory_label,
                 confidence=payload.get("confidence"),
                 notes=payload.get("notes"),
             )
@@ -356,6 +397,7 @@ class ImportJobRepository:
         category = self._category_service.get_or_create(names=names, category_type=category_type)
         if category:
             payload["category"] = names[-1]
+            payload["category_path_text"] = "/".join(names)
             return category.id
         return None
 

@@ -12,6 +12,7 @@ class BalanceSummary(BaseModel):
     cash: float
     investment: float
     total: float
+    reported_at: str = Field(alias="reportedAt")
 
 
 class FlowSummary(BaseModel):
@@ -51,6 +52,7 @@ class RevenueSummaryNode(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     label: str
+    level: int
     monthly: List[float]
     total: float
     children: List['RevenueSummaryNode'] = Field(default_factory=list)
