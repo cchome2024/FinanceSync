@@ -11,6 +11,7 @@ from app.core.permissions import Permission, has_permission
 from app.db import SessionLocal
 from app.models.financial import User, UserRole
 from app.repositories.import_jobs import ImportJobRepository
+from app.repositories.expense_forecast import ExpenseForecastRepository
 from app.services.ai_parser import AIParserService
 from app.services.llm_client import LLMClient
 from app.services.financial_overview import FinancialOverviewService

@@ -608,9 +608,11 @@ class FinancialOverviewService:
             category_item.amount += amount
             category_item.items.append(
                 ExpenseForecastItem(
+                    id=forecast.id,
                     description=forecast.description,
                     accountName=forecast.account_name,
                     amount=amount,
+                    categoryLabel=category_label,
                 )
             )
 

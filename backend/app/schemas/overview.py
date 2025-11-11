@@ -138,9 +138,11 @@ class ExpenseForecastItem(BaseModel):
     """单个支出预测项"""
     model_config = ConfigDict(populate_by_name=True)
 
+    id: str  # 记录ID，用于增删改操作
     description: Optional[str] = None
     account_name: Optional[str] = Field(default=None, alias="accountName")
     amount: float
+    category_label: Optional[str] = Field(default=None, alias="categoryLabel")
 
 
 class ExpenseForecastDetailResponse(BaseModel):

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ActivityIndicator, Dimensions, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native'
+import { ActivityIndicator, Alert, Dimensions, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect } from 'expo-router'
 
@@ -7,6 +7,72 @@ import { apiClient } from '@/src/services/apiClient'
 import { NavLink } from '@/components/common/NavLink'
 import { useAuthStore } from '@/src/state/authStore'
 import { useRouter } from 'expo-router'
+
+// 支出项编辑器组件
+function ExpenseItemEditor({
+  item,
+  month,
+  onSave,
+  onCancel,
+  styles,
+}: {
+  item: any | null
+  month: string
+  onSave: (month: string, id: string | null, description: string, amount: string) => Promise<void>
+  onCancel: () => void
+  styles: any
+}) {
+  // 优先使用 description，如果没有则使用 categoryLabel
+  const initialDescription = item?.description || item?.categoryLabel || ''
+  const [description, setDescription] = useState(initialDescription)
+  const [amount, setAmount] = useState(item ? String(item.amount / 10000) : '')
+  const [saving, setSaving] = useState(false)
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await onSave(month, item?.id || null, description, amount)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <View style={styles.expenseItemEditor}>
+      <TextInput
+        style={styles.expenseItemEditorInput}
+        placeholder="描述/分类"
+        placeholderTextColor="#64748B"
+        value={description}
+        onChangeText={setDescription}
+      />
+      <TextInput
+        style={styles.expenseItemEditorInput}
+        placeholder="金额（万元）"
+        placeholderTextColor="#64748B"
+        value={amount}
+        onChangeText={setAmount}
+        keyboardType="numeric"
+      />
+      <View style={styles.expenseItemEditorActions}>
+        <TouchableOpacity
+          onPress={handleSave}
+          disabled={saving}
+          style={[styles.expenseItemEditorButton, styles.expenseItemEditorButtonSave]}
+        >
+          <Text style={styles.expenseItemEditorButtonText}>{saving ? '保存中...' : '保存'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={onCancel}
+          disabled={saving}
+          style={[styles.expenseItemEditorButton, styles.expenseItemEditorButtonCancel]}
+        >
+          <Text style={styles.expenseItemEditorButtonText}>取消</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  )
+}
 
 type BalanceSummary = {
   cash: number
@@ -81,7 +147,8 @@ export default function DashboardScreen() {
   const { width } = useWindowDimensions()
   const isMobile = width < 768
   const router = useRouter()
-  const { user, logout, isAuthenticated, isLoading: authLoading } = useAuthStore()
+  const { user, logout, isAuthenticated, isLoading: authLoading, hasPermission } = useAuthStore()
+  const canEditExpense = hasPermission('data:import')
 
   const [data, setData] = useState<FinancialOverviewResponse | null>(null)
   const [companyId, setCompanyId] = useState<string | null>(null)
@@ -98,6 +165,8 @@ export default function DashboardScreen() {
   const [expandedExpenseMonth, setExpandedExpenseMonth] = useState<string | null>(null)
   const [expenseDetails, setExpenseDetails] = useState<Record<string, any>>({})
   const [loadingExpenseDetail, setLoadingExpenseDetail] = useState<string | null>(null)
+  const [editingExpenseItem, setEditingExpenseItem] = useState<{ id: string; month: string } | null>(null)
+  const [newExpenseItem, setNewExpenseItem] = useState<{ month: string } | null>(null)
 
   const loadOverview = useCallback(async () => {
     setLoading(true)
@@ -339,6 +408,100 @@ export default function DashboardScreen() {
       return prev
     })
   }, [companyId])
+
+  const reloadExpenseDetail = useCallback(async (month: string) => {
+    setLoadingExpenseDetail(month)
+    const params: Record<string, string> = { month }
+    if (companyId) {
+      params.companyId = companyId
+    }
+    const query = new URLSearchParams(params).toString()
+    try {
+      const response = await apiClient.get(`/api/v1/financial/expense-forecast-detail?${query}`)
+      setExpenseDetails((p) => ({ ...p, [month]: response }))
+      // 重新加载概览数据以更新总支出
+      loadOverview()
+    } catch (error) {
+      console.error('[DASHBOARD] reload expense detail failed', error)
+    } finally {
+      setLoadingExpenseDetail(null)
+    }
+  }, [companyId, loadOverview])
+
+  const handleDeleteExpense = useCallback(async (itemId: string, month: string) => {
+    if (Platform.OS === 'web' && !window.confirm('确定要删除这条支出记录吗？')) {
+      return
+    }
+    
+    try {
+      await apiClient.delete(`/api/v1/expense-forecast/${itemId}`)
+      await reloadExpenseDetail(month)
+      if (Platform.OS !== 'web') {
+        Alert.alert('成功', '支出记录已删除')
+      }
+    } catch (error: any) {
+      const message = error?.body || error?.message || '删除失败'
+      if (Platform.OS === 'web') {
+        alert(message)
+      } else {
+        Alert.alert('删除失败', message)
+      }
+    }
+  }, [reloadExpenseDetail])
+
+  const handleSaveExpense = useCallback(async (
+    month: string,
+    itemId: string | null,
+    description: string,
+    amount: string
+  ) => {
+    const amountNum = parseFloat(amount) * 10000 // 转换为元
+    if (isNaN(amountNum) || amountNum <= 0) {
+      if (Platform.OS === 'web') {
+        alert('请输入有效的金额')
+      } else {
+        Alert.alert('错误', '请输入有效的金额')
+      }
+      return
+    }
+
+    const descValue = description.trim() || null
+    // 描述和分类使用相同的值
+    try {
+      if (itemId) {
+        // 更新
+        await apiClient.put(`/api/v1/expense-forecast/${itemId}`, {
+          description: descValue,
+          account_name: null,
+          amount: amountNum,
+          category_label: descValue,
+        })
+      } else {
+        // 新增
+        await apiClient.post('/api/v1/expense-forecast', {
+          month,
+          description: descValue,
+          account_name: null,
+          amount: amountNum,
+          category_label: descValue,
+          certainty: 'certain',
+        })
+      }
+      setEditingExpenseItem(null)
+      setNewExpenseItem(null)
+      await reloadExpenseDetail(month)
+      if (Platform.OS !== 'web') {
+        Alert.alert('成功', itemId ? '支出记录已更新' : '支出记录已添加')
+      }
+    } catch (error: any) {
+      const message = error?.body || error?.message || (itemId ? '更新失败' : '添加失败')
+      if (Platform.OS === 'web') {
+        alert(message)
+      } else {
+        Alert.alert(itemId ? '更新失败' : '添加失败', message)
+      }
+    }
+  }, [reloadExpenseDetail])
 
   const cashflowRows = useMemo(() => {
     if (!currentCompany?.forecast || !currentCompany.balances) {
@@ -588,22 +751,75 @@ export default function DashboardScreen() {
                                             {detail.categories && detail.categories.length > 0 ? (
                                               detail.categories.flatMap((category: any) =>
                                                 category.items && category.items.length > 0
-                                                  ? category.items.map((item: any, itemIdx: number) => (
-                                                      <View key={`${category.categoryLabel}-${itemIdx}`} style={dynamicStyles.expenseItemRow}>
-                                                        <View style={dynamicStyles.expenseItemInfo}>
-                                                          <Text style={dynamicStyles.expenseItemDescription}>
-                                                            {[item.description, item.accountName].filter(Boolean).join(' · ')}
-                                                          </Text>
+                                                  ? category.items.map((item: any, itemIdx: number) => {
+                                                      const isEditing = editingExpenseItem?.id === item.id
+                                                      return (
+                                                        <View key={`${category.categoryLabel}-${itemIdx}`} style={dynamicStyles.expenseItemRow}>
+                                                          {isEditing ? (
+                                                            <ExpenseItemEditor
+                                                              item={item}
+                                                              month={row.month}
+                                                              onSave={handleSaveExpense}
+                                                              onCancel={() => setEditingExpenseItem(null)}
+                                                              styles={dynamicStyles}
+                                                            />
+                                                          ) : (
+                                                            <>
+                                                              <View style={dynamicStyles.expenseItemInfo}>
+                                                                <Text style={dynamicStyles.expenseItemDescription}>
+                                                                  {[item.description, item.accountName].filter(Boolean).join(' · ')}
+                                                                </Text>
+                                                              </View>
+                                                              <View style={dynamicStyles.expenseItemActions}>
+                                                                <Text style={dynamicStyles.expenseItemAmount}>
+                                                                  {formatCurrency(item.amount)}
+                                                                </Text>
+                                                                {canEditExpense && (
+                                                                  <View style={dynamicStyles.expenseItemButtons}>
+                                                                    <TouchableOpacity
+                                                                      onPress={() => setEditingExpenseItem({ id: item.id, month: row.month })}
+                                                                      style={dynamicStyles.expenseItemButton}
+                                                                    >
+                                                                      <Text style={dynamicStyles.expenseItemButtonText}>编辑</Text>
+                                                                    </TouchableOpacity>
+                                                                    <TouchableOpacity
+                                                                      onPress={() => handleDeleteExpense(item.id, row.month)}
+                                                                      style={[dynamicStyles.expenseItemButton, dynamicStyles.expenseItemButtonDelete]}
+                                                                    >
+                                                                      <Text style={dynamicStyles.expenseItemButtonText}>删除</Text>
+                                                                    </TouchableOpacity>
+                                                                  </View>
+                                                                )}
+                                                              </View>
+                                                            </>
+                                                          )}
                                                         </View>
-                                                        <Text style={dynamicStyles.expenseItemAmount}>
-                                                          {formatCurrency(item.amount)}
-                                                        </Text>
-                                                      </View>
-                                                    ))
+                                                      )
+                                                    })
                                                   : []
                                               )
                                             ) : (
                                               <Text style={dynamicStyles.expenseDetailEmpty}>暂无支出详情</Text>
+                                            )}
+                                            {canEditExpense && (
+                                              <View style={dynamicStyles.expenseItemRow}>
+                                                {newExpenseItem?.month === row.month ? (
+                                                  <ExpenseItemEditor
+                                                    item={null}
+                                                    month={row.month}
+                                                    onSave={handleSaveExpense}
+                                                    onCancel={() => setNewExpenseItem(null)}
+                                                    styles={dynamicStyles}
+                                                  />
+                                                ) : (
+                                                  <TouchableOpacity
+                                                    onPress={() => setNewExpenseItem({ month: row.month })}
+                                                    style={dynamicStyles.addExpenseButton}
+                                                  >
+                                                    <Text style={dynamicStyles.addExpenseButtonText}>+ 添加支出</Text>
+                                                  </TouchableOpacity>
+                                                )}
+                                              </View>
                                             )}
                                           </>
                                         ) : null}
@@ -1328,6 +1544,80 @@ const createStyles = (isMobile: boolean) => StyleSheet.create({
     fontSize: 12,
     paddingVertical: 8,
     textAlign: 'center',
+  },
+  expenseItemActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  expenseItemButtons: {
+    flexDirection: 'row',
+    gap: 6,
+    marginLeft: 8,
+  },
+  expenseItemButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#3B82F6',
+    borderRadius: 4,
+  },
+  expenseItemButtonDelete: {
+    backgroundColor: '#EF4444',
+  },
+  expenseItemButtonText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+  },
+  addExpenseButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#3B82F6',
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  addExpenseButtonText: {
+    color: '#3B82F6',
+    fontSize: 12,
+  },
+  expenseItemEditor: {
+    gap: 8,
+    paddingVertical: 8,
+  },
+  expenseItemEditorInput: {
+    backgroundColor: '#1E293B',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 12,
+    color: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  expenseItemEditorActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  expenseItemEditorButton: {
+    flex: 1,
+    paddingVertical: 6,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  expenseItemEditorButtonSave: {
+    backgroundColor: '#3B82F6',
+  },
+  expenseItemEditorButtonCancel: {
+    backgroundColor: '#64748B',
+  },
+  expenseItemEditorButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
   },
 })
 
