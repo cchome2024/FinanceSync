@@ -22,6 +22,9 @@ from app.schemas.overview import (
     BalanceHistoryItem,
     BalanceSummary,
     CompanyOverview,
+    ExpenseForecastDetailItem,
+    ExpenseForecastDetailResponse,
+    ExpenseForecastItem,
     FinancialOverview,
     FlowSummary,
     ForecastSummary,
@@ -493,7 +496,9 @@ class FinancialOverviewService:
             children = [build_node(child) for child in children_paths]
 
             stats = ensure_path(path)
+            # 月度数据四舍五入显示
             actual_monthly = [round(value, 2) for value in stats["actual_monthly"]]  # type: ignore[arg-type]
+            # 合计从精确值相加后再四舍五入，保证精度
             actual_total = round(stats["actual_sum"], 2)  # type: ignore[arg-type]
 
             node_kwargs = dict(
@@ -518,8 +523,10 @@ class FinancialOverviewService:
 
         nodes = [build_node(path) for path in root_order]
 
+        # 先计算精确的总和，然后再四舍五入，保证精度
+        grand_actual_total_precise = sum(grand_actual_monthly)
         grand_actual = [round(value, 2) for value in grand_actual_monthly]
-        grand_actual_total = round(sum(grand_actual_monthly), 2)
+        grand_actual_total = round(grand_actual_total_precise, 2)
 
         totals_kwargs = dict(
             monthly=grand_actual,
@@ -527,18 +534,97 @@ class FinancialOverviewService:
         )
 
         if include_forecast:
+            # 先计算精确的总和，然后再四舍五入
+            grand_certain_total_precise = sum(grand_forecast_certain_monthly)
+            grand_uncertain_total_precise = sum(grand_forecast_uncertain_monthly)
             grand_certain = [round(value, 2) for value in grand_forecast_certain_monthly]
             grand_uncertain = [round(value, 2) for value in grand_forecast_uncertain_monthly]
             totals_kwargs["forecastCertainMonthly"] = grand_certain
             totals_kwargs["forecastUncertainMonthly"] = grand_uncertain
-            totals_kwargs["forecastCertainTotal"] = round(sum(grand_forecast_certain_monthly), 2)
-            totals_kwargs["forecastUncertainTotal"] = round(sum(grand_forecast_uncertain_monthly), 2)
+            totals_kwargs["forecastCertainTotal"] = round(grand_certain_total_precise, 2)
+            totals_kwargs["forecastUncertainTotal"] = round(grand_uncertain_total_precise, 2)
 
         return RevenueSummaryResponse(
             year=year,
             companyId=company_id,
             totals=RevenueSummaryTotals(**totals_kwargs),
             nodes=nodes,
+        )
+
+    def get_expense_forecast_detail(
+        self,
+        month: str,
+        company_id: Optional[str] = None,
+    ) -> ExpenseForecastDetailResponse:
+        """
+        获取指定月份的支出预测详细信息，按分类分组。
+        
+        Args:
+            month: 月份字符串，格式为 "YYYY-MM"
+            company_id: 可选的公司ID，如果为None则返回所有公司的数据
+        """
+        # 解析月份
+        try:
+            year, month_num = map(int, month.split("-"))
+            month_start = date(year, month_num, 1)
+            # 计算下个月第一天，用于范围查询
+            if month_num == 12:
+                month_end = date(year + 1, 1, 1)
+            else:
+                month_end = date(year, month_num + 1, 1)
+        except (ValueError, IndexError):
+            return ExpenseForecastDetailResponse(month=month, total=0.0, categories=[])
+
+        # 查询该月范围内的支出预测
+        stmt = select(ExpenseForecast).where(
+            ExpenseForecast.cash_out_date >= month_start,
+            ExpenseForecast.cash_out_date < month_end,
+        )
+        if company_id:
+            stmt = stmt.where(ExpenseForecast.company_id == company_id)
+
+        forecasts = [row[0] for row in self._session.execute(stmt)]
+
+        if not forecasts:
+            return ExpenseForecastDetailResponse(month=month, total=0.0, categories=[])
+
+        # 按分类分组
+        category_map: Dict[str, ExpenseForecastDetailItem] = {}
+        total_amount = 0.0
+
+        for forecast in forecasts:
+            category_label = forecast.category_label or forecast.category or "未分类"
+            amount = self._to_float(forecast.expected_amount)
+            total_amount += amount
+
+            if category_label not in category_map:
+                category_map[category_label] = ExpenseForecastDetailItem(
+                    categoryLabel=category_label,
+                    amount=0.0,
+                    items=[],
+                )
+
+            category_item = category_map[category_label]
+            category_item.amount += amount
+            category_item.items.append(
+                ExpenseForecastItem(
+                    description=forecast.description,
+                    accountName=forecast.account_name,
+                    amount=amount,
+                )
+            )
+
+        # 转换为列表并排序（按金额降序）
+        categories = sorted(
+            category_map.values(),
+            key=lambda x: x.amount,
+            reverse=True,
+        )
+
+        return ExpenseForecastDetailResponse(
+            month=month,
+            total=round(total_amount, 2),
+            categories=categories,
         )
 
 

@@ -6,7 +6,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query, status
 
 from app.api.deps import get_financial_overview_service
-from app.schemas.overview import BalanceHistoryItem, FinancialOverview, RevenueSummaryResponse
+from app.schemas.overview import (
+    BalanceHistoryItem,
+    ExpenseForecastDetailResponse,
+    FinancialOverview,
+    RevenueSummaryResponse,
+)
 from app.services.financial_overview import FinancialOverviewService
 
 router = APIRouter(prefix="/api/v1", tags=["overview"])
@@ -55,5 +60,18 @@ def get_balance_history(
     service: FinancialOverviewService = Depends(get_financial_overview_service),
 ) -> list[BalanceHistoryItem]:
     return service.list_balance_history(company_id=company_id)
+
+
+@router.get(
+    "/financial/expense-forecast-detail",
+    response_model=ExpenseForecastDetailResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_expense_forecast_detail(
+    month: str = Query(..., description="月份，格式为 YYYY-MM"),
+    company_id: Optional[str] = Query(None, alias="companyId"),
+    service: FinancialOverviewService = Depends(get_financial_overview_service),
+) -> ExpenseForecastDetailResponse:
+    return service.get_expense_forecast_detail(month=month, company_id=company_id)
 
 

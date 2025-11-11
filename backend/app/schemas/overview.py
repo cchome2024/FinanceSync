@@ -124,3 +124,34 @@ class BalanceHistoryItem(BaseModel):
     investment_balance: float = Field(alias="investmentBalance")
     currency: str = "CNY"
 
+
+class ExpenseForecastDetailItem(BaseModel):
+    """支出预测详细项（按分类分组）"""
+    model_config = ConfigDict(populate_by_name=True)
+
+    category_label: Optional[str] = Field(default=None, alias="categoryLabel")
+    amount: float
+    items: List["ExpenseForecastItem"] = Field(default_factory=list)
+
+
+class ExpenseForecastItem(BaseModel):
+    """单个支出预测项"""
+    model_config = ConfigDict(populate_by_name=True)
+
+    description: Optional[str] = None
+    account_name: Optional[str] = Field(default=None, alias="accountName")
+    amount: float
+
+
+class ExpenseForecastDetailResponse(BaseModel):
+    """支出预测详细信息响应"""
+    model_config = ConfigDict(populate_by_name=True)
+
+    month: str
+    total: float
+    categories: List[ExpenseForecastDetailItem] = Field(default_factory=list)
+
+
+ExpenseForecastDetailItem.model_rebuild()
+ExpenseForecastItem.model_rebuild()
+

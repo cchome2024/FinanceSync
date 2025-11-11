@@ -83,12 +83,17 @@ export default function DashboardScreen() {
   const [companyId, setCompanyId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [revenueSummary, setRevenueSummary] = useState<RevenueSummaryResponse | null>(null)
-  const [revenueYear, setRevenueYear] = useState(new Date().getFullYear())
+  const currentYear = new Date().getFullYear()
+  const [revenueYear, setRevenueYear] = useState(currentYear)
   const [loadingRevenue, setLoadingRevenue] = useState(false)
+  const [availableYears, setAvailableYears] = useState<Set<number>>(new Set([currentYear]))
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set())
-  const [includeForecast, setIncludeForecast] = useState(false)
+  const [includeForecast, setIncludeForecast] = useState(true)
   const [includeCertainIncome, setIncludeCertainIncome] = useState(true)
   const [includeUncertainIncome, setIncludeUncertainIncome] = useState(false)
+  const [expandedExpenseMonth, setExpandedExpenseMonth] = useState<string | null>(null)
+  const [expenseDetails, setExpenseDetails] = useState<Record<string, any>>({})
+  const [loadingExpenseDetail, setLoadingExpenseDetail] = useState<string | null>(null)
 
   const loadOverview = useCallback(async () => {
     setLoading(true)
@@ -121,13 +126,31 @@ export default function DashboardScreen() {
       const query = new URLSearchParams(params).toString()
       const response = await apiClient.get<RevenueSummaryResponse>(`/api/v1/financial/revenue-summary?${query}`)
       setRevenueSummary(response)
+      
+      // 检查该年份是否有数据
+      const hasData = response.nodes.length > 0 || response.totals.total > 0 || 
+                      (includeForecast && (response.totals.forecastCertainTotal ?? 0) > 0) ||
+                      (includeForecast && (response.totals.forecastUncertainTotal ?? 0) > 0)
+      
+      setAvailableYears((prev) => {
+        const next = new Set(prev)
+        if (hasData) {
+          next.add(revenueYear)
+        } else {
+          // 如果没有数据，从可用年份列表中移除（除非是当前年份）
+          if (revenueYear !== currentYear) {
+            next.delete(revenueYear)
+          }
+        }
+        return next
+      })
     } catch (error) {
       console.error('[DASHBOARD] load revenue summary failed', error)
       setRevenueSummary(null)
     } finally {
       setLoadingRevenue(false)
     }
-  }, [companyId, revenueYear, includeForecast])
+  }, [companyId, revenueYear, includeForecast, currentYear])
 
   useEffect(() => {
     loadOverview()
@@ -143,11 +166,8 @@ export default function DashboardScreen() {
       setExpandedKeys(new Set())
       return
     }
-    const initial = new Set<string>()
-    revenueSummary.nodes.forEach((node) => {
-      initial.add(makeNodeKey(null, node.label))
-    })
-    setExpandedKeys(initial)
+    // 默认树形结构是收起来的，不展开任何节点
+    setExpandedKeys(new Set())
   }, [revenueSummary, makeNodeKey])
 
   const toggleNode = useCallback((key: string) => {
@@ -178,8 +198,22 @@ useFocusEffect(
     return companies.find((item) => item.companyId === companyId) ?? companies[0]
   }, [companies, companyId])
 
-  const currentYear = useMemo(() => new Date().getFullYear(), [])
-  const yearOptions = useMemo(() => [currentYear, currentYear - 1, currentYear - 2], [currentYear])
+  // 只显示有数据的年份，如果没有数据则默认显示当前年份
+  const yearOptions = useMemo(() => {
+    const years = Array.from(availableYears).sort((a, b) => b - a)
+    // 如果当前年份不在列表中，确保包含当前年份
+    if (!years.includes(currentYear)) {
+      return [currentYear, ...years].slice(0, 3)
+    }
+    return years.slice(0, 3)
+  }, [availableYears, currentYear])
+  
+  // 如果当前选择的年份不在可用年份列表中，切换到当前年份
+  useEffect(() => {
+    if (!availableYears.has(revenueYear) && revenueYear !== currentYear) {
+      setRevenueYear(currentYear)
+    }
+  }, [availableYears, revenueYear, currentYear])
 
   const revenueRows = useMemo(() => {
     if (!revenueSummary) {
@@ -238,7 +272,11 @@ useFocusEffect(
     if (value === 0) {
       return ''
     }
-    return (value / 10000).toLocaleString('zh-CN', {
+    // 转换为万元，并四舍五入到2位小数
+    const valueInTenThousands = value / 10000
+    // 使用 Math.round 确保四舍五入，然后格式化为2位小数
+    const rounded = Math.round(valueInTenThousands * 100) / 100
+    return rounded.toLocaleString('zh-CN', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })
@@ -261,6 +299,36 @@ useFocusEffect(
       maximumFractionDigits: 2,
     })
   }, [])
+
+  const loadExpenseDetail = useCallback(async (month: string) => {
+    setExpenseDetails((prev) => {
+      if (prev[month]) {
+        // 如果已经加载过，直接切换展开状态
+        setExpandedExpenseMonth((current) => (current === month ? null : month))
+        return prev
+      }
+      // 如果没有加载过，开始加载
+      setLoadingExpenseDetail(month)
+      const params: Record<string, string> = { month }
+      if (companyId) {
+        params.companyId = companyId
+      }
+      const query = new URLSearchParams(params).toString()
+      apiClient
+        .get(`/api/v1/financial/expense-forecast-detail?${query}`)
+        .then((response) => {
+          setExpenseDetails((p) => ({ ...p, [month]: response }))
+          setExpandedExpenseMonth(month)
+        })
+        .catch((error) => {
+          console.error('[DASHBOARD] load expense detail failed', error)
+        })
+        .finally(() => {
+          setLoadingExpenseDetail((current) => (current === month ? null : current))
+        })
+      return prev
+    })
+  }, [companyId])
 
   const cashflowRows = useMemo(() => {
     if (!currentCompany?.forecast || !currentCompany.balances) {
@@ -432,35 +500,104 @@ useFocusEffect(
                           <Text style={dynamicStyles.cashflowUnitHint}>单位：万元</Text>
                           <View style={[dynamicStyles.cashflowRow, dynamicStyles.cashflowHeaderRow]}>
                             <Text style={[dynamicStyles.cashflowCell, dynamicStyles.cashflowMonthCell]}>月份</Text>
+                            <Text style={dynamicStyles.cashflowCell}>结余</Text>
                             <Text style={dynamicStyles.cashflowCell}>期初余额</Text>
+                            <Text style={dynamicStyles.cashflowCell}>支出</Text>
                             {includeCertainIncome && <Text style={dynamicStyles.cashflowCell}>确定性收入</Text>}
                             {includeUncertainIncome && <Text style={dynamicStyles.cashflowCell}>非确定性收入</Text>}
-                            <Text style={dynamicStyles.cashflowCell}>支出</Text>
-                            <Text style={dynamicStyles.cashflowCell}>结余</Text>
                           </View>
-                          {cashflowRows.map((row) => (
-                            <View key={row.month} style={dynamicStyles.cashflowRow}>
-                              <Text style={[dynamicStyles.cashflowCell, dynamicStyles.cashflowMonthCell]}>
-                                {row.month.replace(/(\d{4})-(\d{2})/, '$1年$2月')}
-                              </Text>
-                              <Text style={dynamicStyles.cashflowCell}>{formatCurrency(row.openingBalance)}</Text>
-                              {includeCertainIncome && (
-                                <Text style={dynamicStyles.cashflowCell}>{formatCurrency(row.certainIncome)}</Text>
-                              )}
-                              {includeUncertainIncome && (
-                                <Text style={dynamicStyles.cashflowCell}>{formatCurrency(row.uncertainIncome)}</Text>
-                              )}
-                              <Text style={dynamicStyles.cashflowCell}>{formatCurrency(row.expense)}</Text>
-                              <Text
-                                style={[
-                                  dynamicStyles.cashflowCell,
-                                  row.closingBalance >= 0 ? dynamicStyles.cashflowPositive : dynamicStyles.cashflowNegative,
-                                ]}
-                              >
-                                {formatCurrency(row.closingBalance)}
-                              </Text>
-                            </View>
-                          ))}
+                          {cashflowRows.map((row) => {
+                            const isExpanded = expandedExpenseMonth === row.month
+                            const detail = expenseDetails[row.month]
+                            return (
+                              <View key={row.month}>
+                                <View style={dynamicStyles.cashflowRow}>
+                                  <Text style={[dynamicStyles.cashflowCell, dynamicStyles.cashflowMonthCell]}>
+                                    {row.month.replace(/(\d{4})-(\d{2})/, '$1年$2月')}
+                                  </Text>
+                                  <Text
+                                    style={[
+                                      dynamicStyles.cashflowCell,
+                                      dynamicStyles.cashflowBalanceCell,
+                                      row.closingBalance >= 0 ? dynamicStyles.cashflowPositive : dynamicStyles.cashflowNegative,
+                                    ]}
+                                  >
+                                    {formatCurrency(row.closingBalance)}
+                                  </Text>
+                                  <Text style={dynamicStyles.cashflowCell}>{formatCurrency(row.openingBalance)}</Text>
+                                  <TouchableOpacity
+                                    onPress={() => loadExpenseDetail(row.month)}
+                                    disabled={loadingExpenseDetail === row.month}
+                                  >
+                                    <View style={dynamicStyles.cashflowCell}>
+                                      <View style={dynamicStyles.expenseCellContainer}>
+                                        <Text style={dynamicStyles.cashflowCell}>{formatCurrency(row.expense)}</Text>
+                                        {row.expense > 0 && (
+                                          <Text style={dynamicStyles.expandIcon}>
+                                            {isExpanded ? '▼' : '▶'}
+                                          </Text>
+                                        )}
+                                      </View>
+                                    </View>
+                                  </TouchableOpacity>
+                                  {includeCertainIncome && (
+                                    <Text style={dynamicStyles.cashflowCell}>{formatCurrency(row.certainIncome)}</Text>
+                                  )}
+                                  {includeUncertainIncome && (
+                                    <Text style={dynamicStyles.cashflowCell}>{formatCurrency(row.uncertainIncome)}</Text>
+                                  )}
+                                </View>
+                                {isExpanded && (
+                                  <View style={dynamicStyles.cashflowRow}>
+                                    {/* 月份列 - 空 */}
+                                    <View style={[dynamicStyles.cashflowCell, dynamicStyles.cashflowMonthCell]} />
+                                    {/* 结余列 - 空 */}
+                                    <View style={dynamicStyles.cashflowCell} />
+                                    {/* 期初余额列 - 空 */}
+                                    <View style={dynamicStyles.cashflowCell} />
+                                    {/* 支出列 - 详情容器 */}
+                                    <View style={dynamicStyles.expenseDetailCell}>
+                                      <View style={dynamicStyles.expenseDetailContainer}>
+                                        {loadingExpenseDetail === row.month && !detail ? (
+                                          <View style={dynamicStyles.expenseDetailLoading}>
+                                            <ActivityIndicator size="small" color="#60A5FA" />
+                                            <Text style={dynamicStyles.expenseDetailLoadingText}>加载中...</Text>
+                                          </View>
+                                        ) : detail ? (
+                                          <>
+                                            {detail.categories && detail.categories.length > 0 ? (
+                                              detail.categories.flatMap((category: any) =>
+                                                category.items && category.items.length > 0
+                                                  ? category.items.map((item: any, itemIdx: number) => (
+                                                      <View key={`${category.categoryLabel}-${itemIdx}`} style={dynamicStyles.expenseItemRow}>
+                                                        <View style={dynamicStyles.expenseItemInfo}>
+                                                          <Text style={dynamicStyles.expenseItemDescription}>
+                                                            {[item.description, item.accountName].filter(Boolean).join(' · ')}
+                                                          </Text>
+                                                        </View>
+                                                        <Text style={dynamicStyles.expenseItemAmount}>
+                                                          {formatCurrency(item.amount)}
+                                                        </Text>
+                                                      </View>
+                                                    ))
+                                                  : []
+                                              )
+                                            ) : (
+                                              <Text style={dynamicStyles.expenseDetailEmpty}>暂无支出详情</Text>
+                                            )}
+                                          </>
+                                        ) : null}
+                                      </View>
+                                    </View>
+                                    {/* 确定性收入列 - 空（如果显示） */}
+                                    {includeCertainIncome && <View style={dynamicStyles.cashflowCell} />}
+                                    {/* 非确定性收入列 - 空（如果显示） */}
+                                    {includeUncertainIncome && <View style={dynamicStyles.cashflowCell} />}
+                                  </View>
+                                )}
+                              </View>
+                            )
+                          })}
                         </View>
                       </ScrollView>
                     ) : (
@@ -524,9 +661,15 @@ useFocusEffect(
               </View>
             )}
             {!loadingRevenue && revenueSummary && revenueRows.length > 0 && (
-              <ScrollView horizontal style={dynamicStyles.revenueTableContainer}>
-                <View>
-                  <Text style={dynamicStyles.unitHint}>单位：万元</Text>
+              <View>
+                <Text style={dynamicStyles.unitHint}>单位：万元{isMobile ? '（左右滑动查看完整表格）' : ''}</Text>
+                <ScrollView 
+                  horizontal 
+                  style={dynamicStyles.revenueTableContainer}
+                  showsHorizontalScrollIndicator={true}
+                  contentContainerStyle={isMobile ? { paddingRight: 8 } : undefined}
+                >
+                  <View>
                   <View style={[dynamicStyles.tableRow, dynamicStyles.tableHeaderRow]}>
                     <Text style={[dynamicStyles.tableHeaderCell, dynamicStyles.labelColumn]}>分类</Text>
                     {Array.from({ length: 12 }, (_, index) => (
@@ -649,7 +792,8 @@ useFocusEffect(
                     })()}
                   </View>
                 </View>
-              </ScrollView>
+                </ScrollView>
+              </View>
             )}
             {!loadingRevenue && (!revenueSummary || revenueRows.length === 0) && (
               <Text style={dynamicStyles.loadingText}>暂无收入数据。</Text>
@@ -738,7 +882,7 @@ const createStyles = (isMobile: boolean) => StyleSheet.create({
     flexWrap: 'wrap',
   },
   card: {
-    flexBasis: isMobile ? '100%' : '48%',
+    width: '100%',
     backgroundColor: '#131A2B',
     padding: isMobile ? 12 : 16,
     borderRadius: 16,
@@ -881,6 +1025,14 @@ const createStyles = (isMobile: boolean) => StyleSheet.create({
   revenueTableContainer: {
     borderRadius: 12,
     overflow: 'hidden',
+    // 移动端添加阴影提示可以横向滚动
+    ...(isMobile && {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 4,
+      elevation: 3,
+    }),
   },
   unitHint: {
     color: '#94A3B8',
@@ -1069,13 +1221,93 @@ const createStyles = (isMobile: boolean) => StyleSheet.create({
     minWidth: isMobile ? 70 : 90,
     textAlign: 'left',
   },
+  cashflowBalanceCell: {
+    fontSize: isMobile ? 13 : 15,
+    fontWeight: '700',
+  },
   cashflowPositive: {
     color: '#34D399',
-    fontWeight: '600',
   },
   cashflowNegative: {
     color: '#F87171',
+  },
+  expenseCellContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  expandIcon: {
+    color: '#60A5FA',
+    fontSize: 10,
+    marginLeft: 4,
+  },
+  expenseDetailCell: {
+    minWidth: isMobile ? 70 : 80,
+    paddingHorizontal: isMobile ? 8 : 10,
+  },
+  expenseDetailContainer: {
+    backgroundColor: 'rgba(15, 23, 42, 0.8)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderLeftWidth: 2,
+    borderLeftColor: '#60A5FA',
+  },
+  expenseDetailLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+  },
+  expenseDetailLoadingText: {
+    color: '#94A3B8',
+    fontSize: 12,
+  },
+  expenseCategoryRow: {
+    marginBottom: 12,
+  },
+  expenseCategoryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  expenseCategoryLabel: {
+    color: '#E2E8F0',
+    fontSize: 13,
     fontWeight: '600',
+  },
+  expenseCategoryAmount: {
+    color: '#FACC15',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  expenseItemsContainer: {
+    paddingLeft: 12,
+    gap: 4,
+  },
+  expenseItemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: 4,
+  },
+  expenseItemInfo: {
+    flex: 1,
+  },
+  expenseItemDescription: {
+    color: '#CBD5F5',
+    fontSize: 12,
+  },
+  expenseItemAmount: {
+    color: '#FACC15',
+    fontSize: 12,
+    marginLeft: 8,
+  },
+  expenseDetailEmpty: {
+    color: '#94A3B8',
+    fontSize: 12,
+    paddingVertical: 8,
+    textAlign: 'center',
   },
 })
 
