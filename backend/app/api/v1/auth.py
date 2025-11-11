@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, get_current_user, require_role
-from app.core.auth import create_access_token
+from app.core.auth import create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, ACCESS_TOKEN_EXPIRE_MINUTES_REMEMBER
+from datetime import timedelta
 from app.core.security import hash_password, verify_password
 from app.models.financial import User, UserRole
 from app.schemas.auth import UserCreate, UserLogin, TokenResponse, UserResponse
@@ -61,13 +62,15 @@ def login(
             detail="User account is disabled"
         )
     
-    # 创建访问令牌
+    # 创建访问令牌（根据 remember_me 设置过期时间）
+    expires_delta = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES_REMEMBER) if credentials.remember_me else None
     access_token = create_access_token(
         data={
             "user_id": user.id,
             "email": user.email,
             "role": user.role.value,
-        }
+        },
+        expires_delta=expires_delta
     )
     
     return TokenResponse(

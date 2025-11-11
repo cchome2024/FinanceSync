@@ -15,6 +15,7 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
+    remember_me: bool = False  # 记住我选项，默认 False
 
 
 class UserResponse(BaseModel):

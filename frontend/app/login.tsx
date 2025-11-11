@@ -10,6 +10,7 @@ import {
   Platform,
   KeyboardAvoidingView,
   ScrollView,
+  Switch,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -21,6 +22,7 @@ export default function LoginScreen() {
   const { login, isAuthenticated, isLoading, checkAuth } = useAuthStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [rememberMe, setRememberMe] = useState(false)
 
   useEffect(() => {
     // 检查是否已登录
@@ -40,7 +42,7 @@ export default function LoginScreen() {
     }
 
     try {
-      await login(email.trim(), password)
+      await login(email.trim(), password, rememberMe)
       router.replace('/(app)/dashboard')
     } catch (error: any) {
       const message = error?.body || error?.message || '登录失败，请检查邮箱和密码'
@@ -92,6 +94,17 @@ export default function LoginScreen() {
                   editable={!isLoading}
                   onSubmitEditing={handleLogin}
                 />
+              </View>
+
+              <View style={styles.rememberMeContainer}>
+                <Switch
+                  value={rememberMe}
+                  onValueChange={setRememberMe}
+                  trackColor={{ false: '#334155', true: '#3B82F6' }}
+                  thumbColor={rememberMe ? '#FFFFFF' : '#94A3B8'}
+                  disabled={isLoading}
+                />
+                <Text style={styles.rememberMeText}>记住我（30天）</Text>
               </View>
 
               <TouchableOpacity
@@ -180,6 +193,16 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  rememberMeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: -8,
+  },
+  rememberMeText: {
+    fontSize: 14,
+    color: '#E2E8F0',
   },
 })
 

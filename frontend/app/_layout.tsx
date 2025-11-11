@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Stack, useRouter, useSegments } from 'expo-router'
 
 import { useAuthStore } from '@/src/state/authStore'
@@ -7,13 +7,19 @@ export default function RootLayout() {
   const { isAuthenticated, isLoading, checkAuth } = useAuthStore()
   const segments = useSegments()
   const router = useRouter()
+  const [hasCheckedAuth, setHasCheckedAuth] = useState(false)
 
   useEffect(() => {
-    checkAuth()
+    const initAuth = async () => {
+      await checkAuth()
+      setHasCheckedAuth(true)
+    }
+    initAuth()
   }, [checkAuth])
 
   useEffect(() => {
-    if (isLoading) return
+    // 等待认证检查完成后再进行路由判断
+    if (!hasCheckedAuth || isLoading) return
 
     const inAuthGroup = segments[0] === 'login'
 
@@ -24,7 +30,7 @@ export default function RootLayout() {
       // 已登录，重定向到仪表板
       router.replace('/(app)/dashboard')
     }
-  }, [isAuthenticated, isLoading, segments, router])
+  }, [isAuthenticated, isLoading, segments, router, hasCheckedAuth])
 
   return (
     <Stack

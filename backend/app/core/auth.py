@@ -8,7 +8,8 @@ from app.core.config import get_settings
 
 # JWT配置
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24小时
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7天（默认）
+ACCESS_TOKEN_EXPIRE_MINUTES_REMEMBER = 60 * 24 * 30  # 30天（记住我）
 
 
 def get_secret_key() -> str:

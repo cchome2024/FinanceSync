@@ -81,7 +81,7 @@ export default function DashboardScreen() {
   const { width } = useWindowDimensions()
   const isMobile = width < 768
   const router = useRouter()
-  const { user, logout } = useAuthStore()
+  const { user, logout, isAuthenticated, isLoading: authLoading } = useAuthStore()
 
   const [data, setData] = useState<FinancialOverviewResponse | null>(null)
   const [companyId, setCompanyId] = useState<string | null>(null)
@@ -157,9 +157,12 @@ export default function DashboardScreen() {
   }, [companyId, revenueYear, includeForecast, currentYear])
 
   useEffect(() => {
-    loadOverview()
-    loadRevenueSummary()
-  }, [loadOverview, loadRevenueSummary])
+    // 只有在认证完成且已登录时才加载数据
+    if (!authLoading && isAuthenticated) {
+      loadOverview()
+      loadRevenueSummary()
+    }
+  }, [loadOverview, loadRevenueSummary, authLoading, isAuthenticated])
 
   const makeNodeKey = useCallback((parentKey: string | null, label: string) => {
     return parentKey ? `${parentKey}>${label}` : label
@@ -186,12 +189,15 @@ export default function DashboardScreen() {
     })
   }, [])
 
-useFocusEffect(
-  useCallback(() => {
-    loadOverview()
-    loadRevenueSummary()
-  }, [loadOverview, loadRevenueSummary])
-)
+  useFocusEffect(
+    useCallback(() => {
+      // 只有在认证完成且已登录时才加载数据
+      if (!authLoading && isAuthenticated) {
+        loadOverview()
+        loadRevenueSummary()
+      }
+    }, [loadOverview, loadRevenueSummary, authLoading, isAuthenticated])
+  )
 
   const companies = data?.companies ?? []
 
