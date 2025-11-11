@@ -22,7 +22,7 @@ export default function HistoryScreen() {
           </View>
           <View style={styles.links}>
             <NavLink href="/(app)/dashboard" label="财务看板" textStyle={styles.link} />
-            <NavLink href="/(app)/ai-chat" label="数据录入" textStyle={styles.link} />
+            <NavLink href="/(app)/import" label="数据录入" textStyle={styles.link} />
             <NavLink href="/(app)/analysis" label="查询分析" textStyle={styles.link} />
           </View>
         </View>

@@ -246,17 +246,35 @@ class ImportJobRepository:
             description = (payload.get("description") or payload.get("item") or payload.get("item_name") or "").strip() or None
             account_name = (payload.get("account_name") or payload.get("account") or payload.get("accountName") or "").strip() or None
             category_text = payload.get("category_path_text") or payload.get("category")
-            category_label = payload.get("category")
-            subcategory_label = payload.get("subcategory")
+            category_label = payload.get("category_label") or payload.get("category")
+            subcategory_label = payload.get("subcategory_label") or payload.get("subcategory")
 
+            # 排除当前导入任务中已插入的记录（在同一个事务中）
+            # 只检查已提交的其他任务的记录，避免在同一个导入任务中误判为重复
             stmt = select(RevenueDetail).where(
                 RevenueDetail.company_id == company_id,
                 RevenueDetail.occurred_on == occurred_on,
+                RevenueDetail.amount == amount_value,
             )
+            # 排除当前任务中已插入的记录
+            if job.id:
+                stmt = stmt.where(RevenueDetail.import_job_id != job.id)
+            
             if category_id:
                 stmt = stmt.where(RevenueDetail.category_id == category_id)
+            elif category_text:
+                # 确保 category_text 不是空字符串
+                category_text_clean = category_text.strip() if isinstance(category_text, str) else None
+                if category_text_clean:
+                    stmt = stmt.where(RevenueDetail.category_path_text == category_text_clean)
+                else:
+                    stmt = stmt.where(RevenueDetail.category_path_text.is_(None))
             else:
-                stmt = stmt.where(RevenueDetail.category_path_text == category_text)
+                # 如果既没有category_id也没有category_path_text，则匹配两者都为None的记录
+                stmt = stmt.where(
+                    RevenueDetail.category_id.is_(None),
+                    RevenueDetail.category_path_text.is_(None),
+                )
             if description:
                 stmt = stmt.where(RevenueDetail.description == description)
             else:
@@ -265,7 +283,35 @@ class ImportJobRepository:
                 stmt = stmt.where(RevenueDetail.account_name == account_name)
             else:
                 stmt = stmt.where(RevenueDetail.account_name.is_(None))
-            existing_detail = self.session.execute(stmt).scalar_one_or_none()
+            
+            # 调试日志
+            print(f"[DUPLICATE CHECK] Checking for duplicate revenue:")
+            print(f"  company_id: {company_id}")
+            print(f"  occurred_on: {occurred_on}")
+            print(f"  amount: {amount_value}")
+            print(f"  category_id: {category_id}")
+            print(f"  category_path_text: {category_text}")
+            print(f"  description: {description}")
+            print(f"  account_name: {account_name}")
+            print(f"  current_job_id: {job.id} (excluding records from this job)")
+            
+            # 使用 first() 而不是 scalar_one_or_none()，因为可能有多条匹配的记录
+            result = self.session.execute(stmt).first()
+            existing_detail = result[0] if result else None
+            
+            if existing_detail:
+                print(f"[DUPLICATE CHECK] Found existing record:")
+                print(f"  ID: {existing_detail.id}")
+                print(f"  import_job_id: {existing_detail.import_job_id}")
+                print(f"  amount: {existing_detail.amount}")
+                print(f"  category_path: {existing_detail.category_path_text}")
+                print(f"  description: {existing_detail.description}")
+                # 检查是否有多条匹配的记录
+                all_matches = self.session.execute(stmt).all()
+                if len(all_matches) > 1:
+                    print(f"[DUPLICATE CHECK] WARNING: Found {len(all_matches)} matching records (duplicate data in database)")
+            else:
+                print(f"[DUPLICATE CHECK] No duplicate found")
             conflict_info = {
                 "companyId": company_id,
                 "occurredOn": occurred_on.isoformat(),

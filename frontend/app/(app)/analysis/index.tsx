@@ -74,7 +74,7 @@ export default function AnalysisChatScreen() {
           </View>
           <View style={styles.links}>
             <NavLink href="/(app)/dashboard" label="财务看板" textStyle={styles.historyLink} />
-            <NavLink href="/(app)/ai-chat" label="数据录入" textStyle={styles.historyLink} />
+            <NavLink href="/(app)/import" label="数据录入" textStyle={styles.historyLink} />
           </View>
         </View>
 

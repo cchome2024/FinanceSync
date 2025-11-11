@@ -64,7 +64,9 @@ const ImportPreviewComponent = ({ records }: Props) => {
       <Text style={styles.heading}>候选记录概览（共 {records.length} 条）</Text>
       {grouped.map(([type, items]) => {
         const expanded = expandedTypes[type]
-        const limited = items.slice(0, 3)
+        // 显示前20条记录，如果总数少于20条则全部显示
+        const previewLimit = Math.min(20, items.length)
+        const limited = items.slice(0, previewLimit)
         return (
           <View key={type} style={styles.groupCard}>
             <View style={styles.groupHeader}>
@@ -95,8 +97,10 @@ const ImportPreviewComponent = ({ records }: Props) => {
                     )}
                   </View>
                 ))}
-                {items.length > limited.length && (
-                  <Text style={styles.moreHint}>仅展示前 {limited.length} 条，其余请确认后保存。</Text>
+                {items.length > previewLimit && (
+                  <Text style={styles.moreHint}>
+                    仅展示前 {previewLimit} 条，还有 {items.length - previewLimit} 条将在确认入库时一并保存。
+                  </Text>
                 )}
               </View>
             )}

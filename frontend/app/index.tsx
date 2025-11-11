@@ -1,2 +1,2 @@
-export { default } from './(app)/ai-chat'
+export { default } from './(app)/import'
 
