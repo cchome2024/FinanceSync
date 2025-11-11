@@ -9,7 +9,9 @@ from pydantic import BaseModel
 
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_ai_parser, get_db_session, get_import_job_repository, get_storage_adapter
+from app.api.deps import get_ai_parser, get_db_session, get_import_job_repository, get_storage_adapter, require_permission
+from app.core.permissions import Permission
+from app.models.financial import User
 from app.models.financial import ImportSource, ImportStatus, IncomeForecast, RevenueDetail
 from app.repositories.import_jobs import ImportJobRepository
 from app.schemas.imports import ImportJobDetail, ParseJobResponse
@@ -74,14 +76,16 @@ async def parse_upload(
     prompt: str = Form(...),
     company_id: str | None = Form(None),
     file: UploadFile | None = File(None),
+    user: User = Depends(require_permission(Permission.DATA_IMPORT)),
     repo: ImportJobRepository = Depends(get_import_job_repository),
     parser: AIParserService = Depends(get_ai_parser),
     storage: StorageAdapter = Depends(get_storage_adapter),
 ) -> ParseJobResponse:
     job = repo.create_job(
         source_type=ImportSource.AI_CHAT,
-        initiator_id=None,
-        initiator_role="finance_user",
+        user_id=user.id,
+        initiator_id=user.id,  # 保留向后兼容
+        initiator_role=user.role.value,  # 保留向后兼容
     )
     print(f"[IMPORT] created job {job.id}")
 

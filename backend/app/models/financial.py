@@ -80,6 +80,29 @@ class FinanceCategory(Base):
     expense_forecasts: Mapped[list["ExpenseForecast"]] = relationship(back_populates="category_ref")
 
 
+class UserRole(str, enum.Enum):
+    ADMIN = "admin"
+    FINANCE = "finance"
+    VIEWER = "viewer"
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    role: Mapped[UserRole] = mapped_column(Enum(UserRole), nullable=False, default=UserRole.VIEWER)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    import_jobs: Mapped[list["ImportJob"]] = relationship(back_populates="user")
+
+
 class Company(Base):
     __tablename__ = "companies"
 
@@ -106,8 +129,9 @@ class ImportJob(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     source_type: Mapped[ImportSource] = mapped_column(Enum(ImportSource), nullable=False)
     status: Mapped[ImportStatus] = mapped_column(Enum(ImportStatus), nullable=False, default=ImportStatus.PENDING_REVIEW)
-    initiator_id: Mapped[str | None] = mapped_column(String(36))
-    initiator_role: Mapped[str | None] = mapped_column(String(64))
+    user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"))
+    initiator_id: Mapped[str | None] = mapped_column(String(36))  # 保留向后兼容
+    initiator_role: Mapped[str | None] = mapped_column(String(64))  # 保留向后兼容
     llm_model: Mapped[str | None] = mapped_column(String(64))
     confidence_score: Mapped[float | None] = mapped_column(Float)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
@@ -115,6 +139,7 @@ class ImportJob(Base):
     raw_payload_ref: Mapped[str | None] = mapped_column(String(255))
     error_log: Mapped[str | None] = mapped_column(Text)
 
+    user: Mapped[Optional["User"]] = relationship(back_populates="import_jobs")
     attachments: Mapped[list["Attachment"]] = relationship(back_populates="import_job")
     confirmation_logs: Mapped[list["ConfirmationLog"]] = relationship(back_populates="import_job")
 

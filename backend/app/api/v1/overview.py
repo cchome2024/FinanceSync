@@ -5,7 +5,9 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, status
 
-from app.api.deps import get_financial_overview_service
+from app.api.deps import get_financial_overview_service, require_permission
+from app.core.permissions import Permission
+from app.models.financial import User
 from app.schemas.overview import (
     BalanceHistoryItem,
     ExpenseForecastDetailResponse,
@@ -25,6 +27,7 @@ router = APIRouter(prefix="/api/v1", tags=["overview"])
 def get_financial_overview(
     company_id: Optional[str] = Query(None, alias="companyId"),
     as_of: Optional[date] = Query(None, description="ISO8601 date used as snapshot reference"),
+    user: User = Depends(require_permission(Permission.DATA_VIEW)),
     service: FinancialOverviewService = Depends(get_financial_overview_service),
 ) -> FinancialOverview:
     return service.get_overview(as_of=as_of, company_id=company_id)
@@ -40,6 +43,7 @@ def get_revenue_summary(
     company_id: Optional[str] = Query(None, alias="companyId"),
     max_level: Optional[int] = Query(2, alias="maxLevel", ge=1, le=6),
     include_forecast: bool = Query(False, alias="includeForecast"),
+    user: User = Depends(require_permission(Permission.DATA_VIEW)),
     service: FinancialOverviewService = Depends(get_financial_overview_service),
 ) -> RevenueSummaryResponse:
     return service.get_revenue_summary(
@@ -57,6 +61,7 @@ def get_revenue_summary(
 )
 def get_balance_history(
     company_id: Optional[str] = Query(None, alias="companyId"),
+    user: User = Depends(require_permission(Permission.DATA_VIEW)),
     service: FinancialOverviewService = Depends(get_financial_overview_service),
 ) -> list[BalanceHistoryItem]:
     return service.list_balance_history(company_id=company_id)
@@ -70,6 +75,7 @@ def get_balance_history(
 def get_expense_forecast_detail(
     month: str = Query(..., description="月份，格式为 YYYY-MM"),
     company_id: Optional[str] = Query(None, alias="companyId"),
+    user: User = Depends(require_permission(Permission.DATA_VIEW)),
     service: FinancialOverviewService = Depends(get_financial_overview_service),
 ) -> ExpenseForecastDetailResponse:
     return service.get_expense_forecast_detail(month=month, company_id=company_id)

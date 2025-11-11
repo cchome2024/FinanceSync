@@ -5,6 +5,8 @@ import { useFocusEffect } from 'expo-router'
 
 import { apiClient } from '@/src/services/apiClient'
 import { NavLink } from '@/components/common/NavLink'
+import { useAuthStore } from '@/src/state/authStore'
+import { useRouter } from 'expo-router'
 
 type BalanceSummary = {
   cash: number
@@ -78,6 +80,8 @@ export default function DashboardScreen() {
   // 动态检测是否为手机端
   const { width } = useWindowDimensions()
   const isMobile = width < 768
+  const router = useRouter()
+  const { user, logout } = useAuthStore()
 
   const [data, setData] = useState<FinancialOverviewResponse | null>(null)
   const [companyId, setCompanyId] = useState<string | null>(null)
@@ -435,6 +439,16 @@ useFocusEffect(
             <NavLink href="/(app)/import" label="数据录入" textStyle={dynamicStyles.link} />
             <NavLink href="/(app)/analysis" label="查询分析" textStyle={dynamicStyles.link} />
             <NavLink href="/(app)/history" label="历史记录" textStyle={dynamicStyles.link} />
+            {user && (
+              <TouchableOpacity
+                onPress={async () => {
+                  await logout()
+                  router.replace('/login')
+                }}
+              >
+                <Text style={dynamicStyles.link}>登出 ({user.displayName})</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 

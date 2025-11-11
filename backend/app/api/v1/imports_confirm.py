@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.deps import get_import_job_repository
+from app.api.deps import get_import_job_repository, require_permission
+from app.core.permissions import Permission
+from app.models.financial import User
 from app.repositories.import_jobs import DuplicateRecordError, ImportJobRepository
 from app.schemas.imports import ConfirmationPayload, ConfirmationResult
 
@@ -17,6 +19,7 @@ router = APIRouter(prefix="/api/v1", tags=["imports"])
 def confirm_import_job(
     job_id: str,
     payload: ConfirmationPayload,
+    user: User = Depends(require_permission(Permission.DATA_CONFIRM)),
     repo: ImportJobRepository = Depends(get_import_job_repository),
 ) -> ConfirmationResult:
     job = repo.get_job(job_id)

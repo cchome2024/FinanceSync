@@ -14,6 +14,8 @@ export class HttpError extends Error {
   }
 }
 
+import { useAuthStore } from '@/src/state/authStore'
+
 export type FetchOptions = RequestInit & {
   authToken?: string
 }
@@ -25,8 +27,10 @@ async function request<T>(path: string, options: FetchOptions = {}): Promise<T> 
     ...(options.headers ?? {}),
   }
 
-  if (options.authToken) {
-    headers.Authorization = `Bearer ${options.authToken}`
+  // 优先使用传入的token，否则从store获取
+  const token = options.authToken || useAuthStore.getState().token
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
   }
 
   const init: RequestInit = { ...options, headers }

@@ -4,19 +4,20 @@ version = "0.1.0"
 description = "FinanceSync backend service built with FastAPI and Celery."
 authors = ["FinanceSync Team <finance@example.com>"]
 readme = "README.md"
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.11"
 fastapi = "^0.115.0"
 uvicorn = { extras = ["standard"], version = "^0.30.0" }
-pydantic = "^2.9.0"
+pydantic = {extras = ["email"], version = "^2.9.0"}
 pydantic-settings = "^2.7.0"
 sqlalchemy = "^2.0.34"
 alembic = "^1.13.2"
 psycopg = { extras = ["binary"], version = "^3.2.1" }
 celery = "^5.4.0"
 redis = "^5.1.0"
-watchfiles = "^0.22.0"
+watchfiles = "^0.24.0"
 sqlglot = "^25.7.0"
 pandas = "^2.2.3"
 openpyxl = "^3.1.0"
@@ -24,6 +25,8 @@ python-multipart = "^0.0.9"
 aiofiles = "^24.1.0"
 httpx = "^0.27.2"
 tenacity = "^9.0.0"
+pyjwt = "^2.9.0"
+bcrypt = "^4.2.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"

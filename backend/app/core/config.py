@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     watch_directories: str = ""
     watch_poll_interval_seconds: int = 30
     log_level: str = "INFO"
+    jwt_secret_key: str = "your-secret-key-change-in-production"
 
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 

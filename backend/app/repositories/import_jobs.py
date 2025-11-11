@@ -56,13 +56,15 @@ class ImportJobRepository:
         self,
         *,
         source_type: ImportSource,
-        initiator_id: str | None,
-        initiator_role: str | None,
+        user_id: str | None = None,
+        initiator_id: str | None = None,  # 保留向后兼容
+        initiator_role: str | None = None,  # 保留向后兼容
         llm_model: str | None = None,
     ) -> ImportJob:
         job = ImportJob(
             source_type=source_type,
             status=ImportStatus.PENDING_REVIEW,
+            user_id=user_id,
             initiator_id=initiator_id,
             initiator_role=initiator_role,
             llm_model=llm_model,
