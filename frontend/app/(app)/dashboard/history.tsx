@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { useRouter } from 'expo-router'
 
 import { apiClient } from '@/src/services/apiClient'
 
@@ -14,6 +15,7 @@ type BalanceRecord = {
 }
 
 export default function BalanceHistoryScreen() {
+  const router = useRouter()
   const [records, setRecords] = useState<BalanceRecord[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -36,8 +38,15 @@ export default function BalanceHistoryScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
-        <Text style={styles.title}>账户余额历史</Text>
-        <Text style={styles.subtitle}>展示各公司按时间排序的历史余额记录。</Text>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Text style={styles.backButtonText}>← 返回</Text>
+          </TouchableOpacity>
+          <View style={styles.titleContainer}>
+            <Text style={styles.title}>账户余额历史</Text>
+            <Text style={styles.subtitle}>展示按时间排序的历史余额记录。</Text>
+          </View>
+        </View>
 
         {loading && (
           <View style={styles.loading}>
@@ -52,7 +61,6 @@ export default function BalanceHistoryScreen() {
             keyExtractor={(item, index) => `${item.companyId}-${item.reportedAt}-${index}`}
             renderItem={({ item }) => (
               <View style={styles.record}>
-                <Text style={styles.recordTitle}>{item.companyId || '未指定公司'}</Text>
                 <Text style={styles.recordMeta}>{new Date(item.reportedAt).toLocaleString()}</Text>
                 <Text style={styles.recordValue}>
                   总余额 {item.totalBalance.toLocaleString()} {item.currency}
@@ -80,17 +88,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 16,
   },
+  header: {
+    marginTop: 12,
+    marginBottom: 16,
+  },
+  backButton: {
+    marginBottom: 12,
+  },
+  backButtonText: {
+    color: '#60A5FA',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  titleContainer: {},
   title: {
     color: '#FFFFFF',
     fontSize: 24,
     fontWeight: '700',
-    marginTop: 12,
   },
   subtitle: {
     color: '#94A3B8',
     fontSize: 14,
     marginTop: 6,
-    marginBottom: 16,
   },
   loading: {
     marginTop: 32,
@@ -105,11 +124,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
-  },
-  recordTitle: {
-    color: '#F8FAFC',
-    fontSize: 16,
-    fontWeight: '600',
   },
   recordMeta: {
     color: '#94A3B8',

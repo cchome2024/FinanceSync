@@ -23,6 +23,7 @@ type ForecastSummary = {
   certain: number
   uncertain: number
   expensesMonthly?: Array<{ month: string; amount: number }>
+  incomesMonthly?: Array<{ month: string; certain: number; uncertain: number }>
 }
 
 type CompanyOverview = {
@@ -82,6 +83,8 @@ export default function DashboardScreen() {
   const [loadingRevenue, setLoadingRevenue] = useState(false)
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set())
   const [includeForecast, setIncludeForecast] = useState(false)
+  const [includeCertainIncome, setIncludeCertainIncome] = useState(true)
+  const [includeUncertainIncome, setIncludeUncertainIncome] = useState(false)
 
   const loadOverview = useCallback(async () => {
     setLoading(true)
@@ -248,6 +251,103 @@ useFocusEffect(
     [formatAmount],
   )
 
+  const formatCurrency = useCallback((value: number) => {
+    return (value / 10000).toLocaleString('zh-CN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })
+  }, [])
+
+  const cashflowRows = useMemo(() => {
+    if (!currentCompany?.forecast || !currentCompany.balances) {
+      return []
+    }
+
+    const forecast = currentCompany.forecast
+    const initialBalance = currentCompany.balances.total
+
+    // 构建支出和收入映射表
+    const expenseMap = new Map<string, number>()
+    if (forecast.expensesMonthly) {
+      forecast.expensesMonthly.forEach((item) => {
+        expenseMap.set(item.month, (expenseMap.get(item.month) || 0) + item.amount)
+      })
+    }
+
+    const incomeCertainMap = new Map<string, number>()
+    const incomeUncertainMap = new Map<string, number>()
+    if (forecast.incomesMonthly) {
+      forecast.incomesMonthly.forEach((item) => {
+        if (item.certain > 0) {
+          incomeCertainMap.set(item.month, (incomeCertainMap.get(item.month) || 0) + item.certain)
+        }
+        if (item.uncertain > 0) {
+          incomeUncertainMap.set(item.month, (incomeUncertainMap.get(item.month) || 0) + item.uncertain)
+        }
+      })
+    }
+
+    // 找到所有涉及的月份，从本月开始
+    const now = new Date()
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    
+    const allMonths = new Set<string>()
+    allMonths.add(currentMonth)
+    expenseMap.forEach((_, month) => {
+      if (month >= currentMonth) {
+        allMonths.add(month)
+      }
+    })
+    incomeCertainMap.forEach((_, month) => {
+      if (month >= currentMonth) {
+        allMonths.add(month)
+      }
+    })
+    incomeUncertainMap.forEach((_, month) => {
+      if (month >= currentMonth) {
+        allMonths.add(month)
+      }
+    })
+
+    // 排序月份
+    const sortedMonths = Array.from(allMonths).sort()
+    
+    // 如果没有数据，至少显示当前月份
+    const monthsToShow = sortedMonths.length > 0 ? sortedMonths : [currentMonth]
+
+    // 计算每月的现金流
+    let balance = initialBalance
+    const rows: Array<{
+      month: string
+      openingBalance: number
+      certainIncome: number
+      uncertainIncome: number
+      expense: number
+      closingBalance: number
+    }> = []
+
+    monthsToShow.forEach((month) => {
+      const openingBalance = balance
+      const certainIncome = includeCertainIncome ? (incomeCertainMap.get(month) || 0) : 0
+      const uncertainIncome = includeUncertainIncome ? (incomeUncertainMap.get(month) || 0) : 0
+      const expense = expenseMap.get(month) || 0
+      const closingBalance = openingBalance + certainIncome + uncertainIncome - expense
+
+      rows.push({
+        month,
+        openingBalance,
+        certainIncome,
+        uncertainIncome,
+        expense,
+        closingBalance,
+      })
+
+      balance = closingBalance
+    })
+
+    return rows
+  }, [currentCompany?.forecast, currentCompany?.balances, includeCertainIncome, includeUncertainIncome])
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
@@ -264,28 +364,6 @@ useFocusEffect(
         </View>
 
         <ScrollView contentContainerStyle={styles.scrollContent}>
-          <View style={styles.filterBar}>
-            {companies.map((company) => (
-              <TouchableOpacity
-                key={company.companyId}
-                style={[
-                  styles.filterChip,
-                  company.companyId === (currentCompany?.companyId ?? null) ? styles.filterChipActive : null,
-                ]}
-                onPress={() => setCompanyId(company.companyId)}
-              >
-                <Text
-                  style={[
-                    styles.filterChipText,
-                    company.companyId === (currentCompany?.companyId ?? null) ? styles.filterChipTextActive : null,
-                  ]}
-                >
-                  {company.companyName}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
           {loading && (
             <View style={styles.loadingContainer}>
               <ActivityIndicator color="#60A5FA" />
@@ -294,58 +372,99 @@ useFocusEffect(
           )}
 
           {!loading && currentCompany && (
-            <View style={styles.cards}>
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>账户余额</Text>
-                {currentCompany.balances ? (
-                  <>
-                    <Text style={styles.cardMeta}>截至 {currentCompany.balances.reportedAt}</Text>
-                    <Text style={styles.cardMetric}>{currentCompany.balances.total.toLocaleString()} 元</Text>
-                    <Text style={styles.cardDetail}>
-                      现金 {currentCompany.balances.cash.toLocaleString()} · 理财{' '}
-                      {currentCompany.balances.investment.toLocaleString()}
-                    </Text>
-                  </>
-                ) : (
-                  <Text style={styles.cardDetail}>暂无余额数据</Text>
-                )}
-                <View style={styles.cardFooter}>
-                  <Text style={styles.cardHint}>当前显示最新数据</Text>
-                  <NavLink href="/(app)/dashboard/history" label="查看历史" textStyle={styles.cardLink} />
+            <>
+              <View style={styles.cards}>
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>账户余额</Text>
+                  {currentCompany.balances ? (
+                    <>
+                      <Text style={styles.cardMeta}>截至 {currentCompany.balances.reportedAt}</Text>
+                      <Text style={styles.cardMetric}>{currentCompany.balances.total.toLocaleString()} 元</Text>
+                      <Text style={styles.cardDetail}>
+                        现金 {currentCompany.balances.cash.toLocaleString()} · 理财{' '}
+                        {currentCompany.balances.investment.toLocaleString()}
+                      </Text>
+                    </>
+                  ) : (
+                    <Text style={styles.cardDetail}>暂无余额数据</Text>
+                  )}
+                  <View style={styles.cardFooter}>
+                    <Text style={styles.cardHint}>当前显示最新数据</Text>
+                    <NavLink href="/(app)/dashboard/history" label="查看历史" textStyle={styles.cardLink} />
+                  </View>
                 </View>
               </View>
 
-              <View style={styles.card}>
+              <View style={styles.cashflowCard}>
                 <Text style={styles.cardTitle}>预测现金流</Text>
                 {currentCompany.forecast ? (
                   <>
-                    <Text style={styles.cardMetric}>
-                      确定 {currentCompany.forecast.certain.toLocaleString()} 元 · 非确定{' '}
-                      {currentCompany.forecast.uncertain.toLocaleString()} 元
-                    </Text>
-                    {currentCompany.forecast.expensesMonthly && currentCompany.forecast.expensesMonthly.length > 0 ? (
-                      <View style={styles.expenseForecastBlock}>
-                        <Text style={styles.expenseForecastTitle}>支出预测</Text>
-                        {currentCompany.forecast.expensesMonthly.map((item) => (
-                          <View key={item.month} style={styles.expenseForecastRow}>
-                            <Text style={styles.expenseForecastMonth}>{item.month}</Text>
-                            <Text style={styles.expenseForecastAmount}>
-                              {(item.amount / 10000).toLocaleString('zh-CN', {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                              万元
-                            </Text>
+                    <View style={styles.cashflowCheckboxes}>
+                      <TouchableOpacity
+                        style={[styles.checkbox, includeCertainIncome && styles.checkboxChecked]}
+                        onPress={() => setIncludeCertainIncome((prev) => !prev)}
+                      >
+                        <View style={[styles.checkboxIndicator, includeCertainIncome && styles.checkboxIndicatorChecked]}>
+                          {includeCertainIncome && <Text style={styles.checkboxCheckmark}>✓</Text>}
+                        </View>
+                        <Text style={styles.checkboxLabel}>预测确定性收入</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.checkbox, includeUncertainIncome && styles.checkboxChecked]}
+                        onPress={() => setIncludeUncertainIncome((prev) => !prev)}
+                      >
+                        <View style={[styles.checkboxIndicator, includeUncertainIncome && styles.checkboxIndicatorChecked]}>
+                          {includeUncertainIncome && <Text style={styles.checkboxCheckmark}>✓</Text>}
+                        </View>
+                        <Text style={styles.checkboxLabel}>预测非确定性收入</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {cashflowRows.length > 0 ? (
+                      <ScrollView horizontal style={styles.cashflowTableContainer}>
+                        <View>
+                          <Text style={styles.cashflowUnitHint}>单位：万元</Text>
+                          <View style={[styles.cashflowRow, styles.cashflowHeaderRow]}>
+                            <Text style={[styles.cashflowCell, styles.cashflowMonthCell]}>月份</Text>
+                            <Text style={styles.cashflowCell}>期初余额</Text>
+                            {includeCertainIncome && <Text style={styles.cashflowCell}>确定性收入</Text>}
+                            {includeUncertainIncome && <Text style={styles.cashflowCell}>非确定性收入</Text>}
+                            <Text style={styles.cashflowCell}>支出</Text>
+                            <Text style={styles.cashflowCell}>结余</Text>
                           </View>
-                        ))}
-                      </View>
-                    ) : null}
+                          {cashflowRows.map((row) => (
+                            <View key={row.month} style={styles.cashflowRow}>
+                              <Text style={[styles.cashflowCell, styles.cashflowMonthCell]}>
+                                {row.month.replace(/(\d{4})-(\d{2})/, '$1年$2月')}
+                              </Text>
+                              <Text style={styles.cashflowCell}>{formatCurrency(row.openingBalance)}</Text>
+                              {includeCertainIncome && (
+                                <Text style={styles.cashflowCell}>{formatCurrency(row.certainIncome)}</Text>
+                              )}
+                              {includeUncertainIncome && (
+                                <Text style={styles.cashflowCell}>{formatCurrency(row.uncertainIncome)}</Text>
+                              )}
+                              <Text style={styles.cashflowCell}>{formatCurrency(row.expense)}</Text>
+                              <Text
+                                style={[
+                                  styles.cashflowCell,
+                                  row.closingBalance >= 0 ? styles.cashflowPositive : styles.cashflowNegative,
+                                ]}
+                              >
+                                {formatCurrency(row.closingBalance)}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      </ScrollView>
+                    ) : (
+                      <Text style={styles.cardDetail}>暂无预测数据</Text>
+                    )}
                   </>
                 ) : (
                   <Text style={styles.cardDetail}>暂无预测数据</Text>
                 )}
               </View>
-            </View>
+            </>
           )}
 
           <View style={styles.revenueSection}>
@@ -615,6 +734,13 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginTop: 12,
   },
+  cashflowCard: {
+    width: '100%',
+    backgroundColor: '#131A2B',
+    padding: 16,
+    borderRadius: 16,
+    marginTop: 12,
+  },
   cardTitle: {
     color: '#94A3B8',
     fontSize: 14,
@@ -858,6 +984,84 @@ const styles = StyleSheet.create({
   forecastUncertainValue: {
     color: '#F97316',
     fontSize: 12,
+  },
+  cashflowCheckboxes: {
+    flexDirection: 'row',
+    gap: 16,
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  checkbox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  checkboxChecked: {
+    // 可以添加选中状态的样式
+  },
+  checkboxIndicator: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#60A5FA',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxIndicatorChecked: {
+    backgroundColor: '#3B82F6',
+    borderColor: '#3B82F6',
+  },
+  checkboxCheckmark: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    lineHeight: 14,
+  },
+  checkboxLabel: {
+    color: '#CBD5F5',
+    fontSize: 13,
+  },
+  cashflowTableContainer: {
+    marginTop: 8,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  cashflowUnitHint: {
+    color: '#94A3B8',
+    fontSize: 12,
+    marginBottom: 6,
+    paddingLeft: 12,
+  },
+  cashflowRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+  },
+  cashflowHeaderRow: {
+    backgroundColor: 'rgba(30, 64, 175, 0.5)',
+  },
+  cashflowCell: {
+    color: '#F8FAFC',
+    fontSize: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    minWidth: 80,
+    textAlign: 'right',
+  },
+  cashflowMonthCell: {
+    minWidth: 90,
+    textAlign: 'left',
+  },
+  cashflowPositive: {
+    color: '#34D399',
+    fontWeight: '600',
+  },
+  cashflowNegative: {
+    color: '#F87171',
+    fontWeight: '600',
   },
 })
 
