@@ -228,8 +228,8 @@ export default function DashboardScreen() {
   useEffect(() => {
     // 只有在认证完成且已登录时才加载数据
     if (!authLoading && isAuthenticated) {
-      loadOverview()
-      loadRevenueSummary()
+    loadOverview()
+    loadRevenueSummary()
     }
   }, [loadOverview, loadRevenueSummary, authLoading, isAuthenticated])
 
@@ -258,15 +258,15 @@ export default function DashboardScreen() {
     })
   }, [])
 
-  useFocusEffect(
-    useCallback(() => {
+useFocusEffect(
+  useCallback(() => {
       // 只有在认证完成且已登录时才加载数据
       if (!authLoading && isAuthenticated) {
-        loadOverview()
-        loadRevenueSummary()
+    loadOverview()
+    loadRevenueSummary()
       }
     }, [loadOverview, loadRevenueSummary, authLoading, isAuthenticated])
-  )
+)
 
   const companies = data?.companies ?? []
 
@@ -346,6 +346,62 @@ export default function DashboardScreen() {
     traverse(revenueSummary.nodes, null, 0)
     return rows
   }, [revenueSummary, expandedKeys, makeNodeKey])
+
+  // 计算有数据的月份（倒序排列）
+  const activeMonths = useMemo(() => {
+    if (!revenueSummary) {
+      return []
+    }
+    
+    // 检查哪些月份有数据（检查 totals 和所有行的 monthly）
+    const hasData = new Set<number>()
+    
+    // 检查 totals.monthly
+    revenueSummary.totals.monthly.forEach((value, idx) => {
+      if (value !== 0) {
+        hasData.add(idx)
+      }
+    })
+    
+    // 检查所有行的 monthly
+    revenueRows.forEach((row) => {
+      row.monthly.forEach((value, idx) => {
+        if (value !== 0) {
+          hasData.add(idx)
+        }
+      })
+      // 也检查预测数据
+      if (includeForecast) {
+        row.forecastCertainMonthly?.forEach((value, idx) => {
+          if (value !== 0) {
+            hasData.add(idx)
+          }
+        })
+        row.forecastUncertainMonthly?.forEach((value, idx) => {
+          if (value !== 0) {
+            hasData.add(idx)
+          }
+        })
+      }
+    })
+    
+    // 检查 totals 的预测数据
+    if (includeForecast) {
+      revenueSummary.totals.forecastCertainMonthly?.forEach((value, idx) => {
+        if (value !== 0) {
+          hasData.add(idx)
+        }
+      })
+      revenueSummary.totals.forecastUncertainMonthly?.forEach((value, idx) => {
+        if (value !== 0) {
+          hasData.add(idx)
+        }
+      })
+    }
+    
+    // 转换为数组并按倒序排列（从12月到1月）
+    return Array.from(hasData).sort((a, b) => b - a)
+  }, [revenueSummary, revenueRows, includeForecast])
 
   const formatAmount = useCallback((value: number) => {
     if (value === 0) {
@@ -605,7 +661,9 @@ export default function DashboardScreen() {
             <Text style={dynamicStyles.subtitle}>{data ? `数据截至 ${data.asOf}` : '加载中...'}</Text>
           </View>
           <View style={dynamicStyles.links}>
-            <NavLink href="/(app)/import" label="数据录入" textStyle={dynamicStyles.link} />
+            {hasPermission('data:import') && (
+              <NavLink href="/(app)/import" label="数据录入" textStyle={dynamicStyles.link} />
+            )}
             <NavLink href="/(app)/analysis" label="查询分析" textStyle={dynamicStyles.link} />
             <NavLink href="/(app)/history" label="历史记录" textStyle={dynamicStyles.link} />
             {user && (
@@ -619,7 +677,7 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             )}
           </View>
-        </View>
+          </View>
 
         <ScrollView contentContainerStyle={dynamicStyles.scrollContent}>
           {loading && (
@@ -634,21 +692,32 @@ export default function DashboardScreen() {
               <View style={dynamicStyles.cards}>
                 <View style={dynamicStyles.card}>
                   <Text style={dynamicStyles.cardTitle}>账户余额</Text>
-                  {currentCompany.balances ? (
-                    <>
+                {currentCompany.balances ? (
+                  <>
                       <Text style={dynamicStyles.cardMeta}>截至 {currentCompany.balances.reportedAt}</Text>
                       <Text style={dynamicStyles.cardMetric}>{currentCompany.balances.total.toLocaleString()} 元</Text>
                       <Text style={dynamicStyles.cardDetail}>
-                        现金 {currentCompany.balances.cash.toLocaleString()} · 理财{' '}
-                        {currentCompany.balances.investment.toLocaleString()}
-                      </Text>
-                    </>
-                  ) : (
+                      现金 {currentCompany.balances.cash.toLocaleString()} · 理财{' '}
+                      {currentCompany.balances.investment.toLocaleString()}
+                    </Text>
+                  </>
+                ) : (
                     <Text style={dynamicStyles.cardDetail}>暂无余额数据</Text>
                   )}
                   <View style={dynamicStyles.cardFooter}>
                     <Text style={dynamicStyles.cardHint}>当前显示最新数据</Text>
-                    <NavLink href="/(app)/dashboard/history" label="查看历史" textStyle={dynamicStyles.cardLink} />
+                    <View style={dynamicStyles.cardFooterActions}>
+                      <TouchableOpacity
+                        onPress={() => {
+                          loadOverview()
+                        }}
+                        disabled={loading}
+                        style={dynamicStyles.refreshButton}
+                      >
+                        <Text style={dynamicStyles.refreshButtonText}>🔄 刷新</Text>
+                      </TouchableOpacity>
+                      <NavLink href="/(app)/dashboard/history" label="查看历史" textStyle={dynamicStyles.cardLink} />
+                    </View>
                   </View>
                 </View>
               </View>
@@ -697,7 +766,7 @@ export default function DashboardScreen() {
                                 <View style={dynamicStyles.cashflowRow}>
                                   <Text style={[dynamicStyles.cashflowCell, dynamicStyles.cashflowMonthCell]}>
                                     {row.month.replace(/(\d{4})-(\d{2})/, '$1年$2月')}
-                                  </Text>
+                    </Text>
                                   <Text
                                     style={[
                                       dynamicStyles.cashflowCell,
@@ -706,7 +775,7 @@ export default function DashboardScreen() {
                                     ]}
                                   >
                                     {formatCurrency(row.closingBalance)}
-                                  </Text>
+                            </Text>
                                   <Text style={dynamicStyles.cashflowCell}>{formatCurrency(row.openingBalance)}</Text>
                                   <TouchableOpacity
                                     onPress={() => loadExpenseDetail(row.month)}
@@ -720,8 +789,8 @@ export default function DashboardScreen() {
                                             {isExpanded ? '▼' : '▶'}
                                           </Text>
                                         )}
-                                      </View>
-                                    </View>
+                          </View>
+                      </View>
                                   </TouchableOpacity>
                                   {includeCertainIncome && (
                                     <Text style={dynamicStyles.cashflowCell}>{formatCurrency(row.certainIncome)}</Text>
@@ -818,8 +887,8 @@ export default function DashboardScreen() {
                                                   >
                                                     <Text style={dynamicStyles.addExpenseButtonText}>+ 添加支出</Text>
                                                   </TouchableOpacity>
-                                                )}
-                                              </View>
+                )}
+              </View>
                                             )}
                                           </>
                                         ) : null}
@@ -829,7 +898,7 @@ export default function DashboardScreen() {
                                     {includeCertainIncome && <View style={dynamicStyles.cashflowCell} />}
                                     {/* 非确定性收入列 - 空（如果显示） */}
                                     {includeUncertainIncome && <View style={dynamicStyles.cashflowCell} />}
-                                  </View>
+            </View>
                                 )}
                               </View>
                             )
@@ -897,7 +966,7 @@ export default function DashboardScreen() {
               </View>
             )}
             {!loadingRevenue && revenueSummary && revenueRows.length > 0 && (
-              <View>
+                <View>
                 <Text style={dynamicStyles.unitHint}>单位：万元{isMobile ? '（左右滑动查看完整表格）' : ''}</Text>
                 <ScrollView 
                   horizontal 
@@ -908,17 +977,17 @@ export default function DashboardScreen() {
                   <View>
                   <View style={[dynamicStyles.tableRow, dynamicStyles.tableHeaderRow]}>
                     <Text style={[dynamicStyles.tableHeaderCell, dynamicStyles.labelColumn]}>分类</Text>
-                    {Array.from({ length: 12 }, (_, index) => (
-                      <Text key={`month-${index}`} style={dynamicStyles.tableHeaderCell}>
-                        {index + 1} 月
+                    <Text style={[dynamicStyles.tableHeaderCell, dynamicStyles.totalColumn]}>合计</Text>
+                    {activeMonths.map((monthIndex) => (
+                      <Text key={`month-${monthIndex}`} style={dynamicStyles.tableHeaderCell}>
+                        {monthIndex + 1} 月
                       </Text>
                     ))}
-                    <Text style={[dynamicStyles.tableHeaderCell, dynamicStyles.totalColumn]}>合计</Text>
                   </View>
                   {revenueRows.map((row) => (
                     <View key={row.key} style={dynamicStyles.tableRow}>
                       <View style={[dynamicStyles.tableCell, dynamicStyles.labelColumn]}>
-                        <View style={[dynamicStyles.treeLabelContainer, { paddingLeft: 12 + row.depth * 16 }]}>
+                        <View style={[dynamicStyles.treeLabelContainer, { paddingLeft: 12 + row.depth * 8 }]}>
                           {row.hasChildren ? (
                             <TouchableOpacity
                               onPress={() => toggleNode(row.key)}
@@ -939,29 +1008,15 @@ export default function DashboardScreen() {
                           ) : (
                             <View style={dynamicStyles.collapsePlaceholder} />
                           )}
-                          <Text style={dynamicStyles.labelText}>{row.label}</Text>
+                          <Text style={[
+                            dynamicStyles.labelText,
+                            row.depth === 0 && dynamicStyles.labelTextLevel0,
+                            row.depth === 1 && dynamicStyles.labelTextLevel1,
+                            row.depth === 2 && dynamicStyles.labelTextLevel2,
+                            row.depth >= 3 && dynamicStyles.labelTextLevel3,
+                          ]}>{row.label}</Text>
                         </View>
                       </View>
-                      {row.monthly.map((value, idx) => {
-                        const certainValue = row.forecastCertainMonthly?.[idx] ?? 0
-                        const uncertainValue = row.forecastUncertainMonthly?.[idx] ?? 0
-                        const actualText = formatAmount(value)
-                        const certainText = includeForecast ? formatForecastAmount(certainValue) : ''
-                        const uncertainText = includeForecast ? formatForecastAmount(uncertainValue) : ''
-                        const showCertain = includeForecast && !!certainText
-                        const showUncertain = includeForecast && !!uncertainText
-                        return (
-                          <Text key={`${row.key}-m-${idx}`} style={dynamicStyles.tableCell}>
-                            {actualText || (showCertain || showUncertain ? ' ' : '')}
-                            {showCertain ? '\n' : ''}
-                            {showCertain ? <Text style={dynamicStyles.forecastCertainValue}>{certainText}</Text> : null}
-                            {showUncertain ? '\n' : ''}
-                            {showUncertain ? (
-                              <Text style={dynamicStyles.forecastUncertainValue}>{uncertainText}</Text>
-                            ) : null}
-                          </Text>
-                        )
-                      })}
                       {(() => {
                         const forecastCertain = row.forecastCertainTotal ?? 0
                         const forecastUncertain = row.forecastUncertainTotal ?? 0
@@ -971,41 +1026,36 @@ export default function DashboardScreen() {
                         const showCertain = includeForecast && !!certainText
                         const showUncertain = includeForecast && !!uncertainText
                         return (
-                          <Text style={[dynamicStyles.tableCell, dynamicStyles.totalColumn]}>
-                            {actualText || (showCertain || showUncertain ? ' ' : '')}
-                            {showCertain ? '\n' : ''}
-                            {showCertain ? <Text style={dynamicStyles.forecastCertainValue}>{certainText}</Text> : null}
-                            {showUncertain ? '\n' : ''}
-                            {showUncertain ? (
-                              <Text style={dynamicStyles.forecastUncertainValue}>{uncertainText}</Text>
-                            ) : null}
-                          </Text>
+                          <View style={[dynamicStyles.tableCell, dynamicStyles.totalColumn]}>
+                            {actualText ? <Text style={dynamicStyles.tableCellTextTotal}>{actualText}</Text> : null}
+                            {showCertain ? <Text style={[dynamicStyles.tableCellTextTotal, dynamicStyles.forecastCertainValue]}>{certainText}</Text> : null}
+                            {showUncertain ? <Text style={[dynamicStyles.tableCellTextTotal, dynamicStyles.forecastUncertainValue]}>{uncertainText}</Text> : null}
+                          </View>
                         )
                       })()}
-                    </View>
-                  ))}
-                  <View style={[dynamicStyles.tableRow, dynamicStyles.tableTotalRow]}>
-                    <Text style={[dynamicStyles.tableCell, dynamicStyles.labelColumn]}>合计</Text>
-                    {revenueSummary.totals.monthly.map((value, idx) => {
-                      const forecastCertain = revenueSummary.totals.forecastCertainMonthly?.[idx] ?? 0
-                      const forecastUncertain = revenueSummary.totals.forecastUncertainMonthly?.[idx] ?? 0
+                      {activeMonths.map((monthIndex) => {
+                        const value = row.monthly[monthIndex] ?? 0
+                        const certainValue = row.forecastCertainMonthly?.[monthIndex] ?? 0
+                        const uncertainValue = row.forecastUncertainMonthly?.[monthIndex] ?? 0
                       const actualText = formatAmount(value)
-                      const certainText = includeForecast ? formatForecastAmount(forecastCertain) : ''
-                      const uncertainText = includeForecast ? formatForecastAmount(forecastUncertain) : ''
+                        const certainText = includeForecast ? formatForecastAmount(certainValue) : ''
+                        const uncertainText = includeForecast ? formatForecastAmount(uncertainValue) : ''
                       const showCertain = includeForecast && !!certainText
                       const showUncertain = includeForecast && !!uncertainText
                       return (
-                        <Text key={`total-${idx}`} style={dynamicStyles.tableCell}>
-                          {actualText || (showCertain || showUncertain ? ' ' : '')}
-                          {showCertain ? '\n' : ''}
-                          {showCertain ? <Text style={dynamicStyles.forecastCertainValue}>{certainText}</Text> : null}
-                          {showUncertain ? '\n' : ''}
-                          {showUncertain ? (
-                            <Text style={dynamicStyles.forecastUncertainValue}>{uncertainText}</Text>
-                          ) : null}
-                        </Text>
-                      )
-                    })}
+                          <View key={`${row.key}-m-${monthIndex}`} style={dynamicStyles.tableCell}>
+                            {actualText ? <Text style={dynamicStyles.tableCellText}>{actualText}</Text> : null}
+                            {showCertain ? <Text style={[dynamicStyles.tableCellText, dynamicStyles.forecastCertainValue]}>{certainText}</Text> : null}
+                            {showUncertain ? <Text style={[dynamicStyles.tableCellText, dynamicStyles.forecastUncertainValue]}>{uncertainText}</Text> : null}
+                          </View>
+                        )
+                      })}
+                    </View>
+                  ))}
+                  <View style={[dynamicStyles.tableRow, dynamicStyles.tableTotalRow]}>
+                    <View style={[dynamicStyles.tableCell, dynamicStyles.labelColumn]}>
+                      <Text style={dynamicStyles.labelText}>合计</Text>
+                    </View>
                     {(() => {
                       const forecastCertain = revenueSummary.totals.forecastCertainTotal ?? 0
                       const forecastUncertain = revenueSummary.totals.forecastUncertainTotal ?? 0
@@ -1015,20 +1065,33 @@ export default function DashboardScreen() {
                       const showCertain = includeForecast && !!certainText
                       const showUncertain = includeForecast && !!uncertainText
                       return (
-                        <Text style={[dynamicStyles.tableCell, dynamicStyles.totalColumn]}>
-                          {actualText || (showCertain || showUncertain ? ' ' : '')}
-                          {showCertain ? '\n' : ''}
-                          {showCertain ? <Text style={dynamicStyles.forecastCertainValue}>{certainText}</Text> : null}
-                          {showUncertain ? '\n' : ''}
-                          {showUncertain ? (
-                            <Text style={dynamicStyles.forecastUncertainValue}>{uncertainText}</Text>
-                          ) : null}
-                        </Text>
+                        <View style={[dynamicStyles.tableCell, dynamicStyles.totalColumn]}>
+                          {actualText ? <Text style={dynamicStyles.tableCellTextTotal}>{actualText}</Text> : null}
+                          {showCertain ? <Text style={[dynamicStyles.tableCellTextTotal, dynamicStyles.forecastCertainValue]}>{certainText}</Text> : null}
+                          {showUncertain ? <Text style={[dynamicStyles.tableCellTextTotal, dynamicStyles.forecastUncertainValue]}>{uncertainText}</Text> : null}
+                        </View>
                       )
                     })()}
+                    {activeMonths.map((monthIndex) => {
+                      const value = revenueSummary.totals.monthly[monthIndex] ?? 0
+                      const forecastCertain = revenueSummary.totals.forecastCertainMonthly?.[monthIndex] ?? 0
+                      const forecastUncertain = revenueSummary.totals.forecastUncertainMonthly?.[monthIndex] ?? 0
+                      const actualText = formatAmount(value)
+                      const certainText = includeForecast ? formatForecastAmount(forecastCertain) : ''
+                      const uncertainText = includeForecast ? formatForecastAmount(forecastUncertain) : ''
+                      const showCertain = includeForecast && !!certainText
+                      const showUncertain = includeForecast && !!uncertainText
+                      return (
+                        <View key={`total-${monthIndex}`} style={dynamicStyles.tableCell}>
+                          {actualText ? <Text style={dynamicStyles.tableCellText}>{actualText}</Text> : null}
+                          {showCertain ? <Text style={[dynamicStyles.tableCellText, dynamicStyles.forecastCertainValue]}>{certainText}</Text> : null}
+                          {showUncertain ? <Text style={[dynamicStyles.tableCellText, dynamicStyles.forecastUncertainValue]}>{uncertainText}</Text> : null}
+                        </View>
+                      )
+                    })}
                   </View>
                 </View>
-                </ScrollView>
+              </ScrollView>
               </View>
             )}
             {!loadingRevenue && (!revenueSummary || revenueRows.length === 0) && (
@@ -1184,6 +1247,19 @@ const createStyles = (isMobile: boolean) => StyleSheet.create({
     color: '#94A3B8',
     fontSize: 12,
   },
+  cardFooterActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  refreshButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  refreshButtonText: {
+    color: '#60A5FA',
+    fontSize: 12,
+  },
   cardLink: {
     color: '#60A5FA',
     fontSize: 12,
@@ -1202,10 +1278,10 @@ const createStyles = (isMobile: boolean) => StyleSheet.create({
     gap: 12,
   },
   revenueControls: {
-    flexDirection: isMobile ? 'column' : 'row',
-    alignItems: isMobile ? 'stretch' : 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 12,
-    width: isMobile ? '100%' : 'auto',
+    flexWrap: 'wrap',
     marginTop: isMobile ? 8 : 0,
   },
   sectionTitle: {
@@ -1244,6 +1320,7 @@ const createStyles = (isMobile: boolean) => StyleSheet.create({
     borderColor: 'rgba(250, 204, 21, 0.4)',
     paddingHorizontal: 12,
     paddingVertical: 6,
+    alignSelf: 'flex-start',
   },
   forecastToggleActive: {
     backgroundColor: 'rgba(250, 204, 21, 0.2)',
@@ -1325,34 +1402,60 @@ const createStyles = (isMobile: boolean) => StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: isMobile ? 8 : 12,
     minWidth: isMobile ? 60 : 72,
+    width: isMobile ? 60 : 72,
     textAlign: 'right',
   },
   tableCell: {
-    color: '#F8FAFC',
-    fontSize: isMobile ? 12 : 13,
     paddingVertical: 8,
     paddingHorizontal: isMobile ? 8 : 12,
     minWidth: isMobile ? 60 : 72,
+    width: isMobile ? 60 : 72,
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    flexShrink: 0,
+  },
+  tableCellText: {
+    color: '#F8FAFC',
+    fontSize: isMobile ? 12 : 13,
     textAlign: 'right',
+    lineHeight: isMobile ? 16 : 18,
+    width: '100%',
+    includeFontPadding: false,
+    textAlignVertical: 'top',
+  },
+  tableCellTextTotal: {
+    color: '#F8FAFC',
+    fontSize: isMobile ? 14 : 15,
+    fontWeight: '700',
+    textAlign: 'right',
+    lineHeight: isMobile ? 18 : 20,
+    width: '100%',
+    includeFontPadding: false,
+    textAlignVertical: 'top',
   },
   labelColumn: {
-    minWidth: isMobile ? 120 : 180,
+    minWidth: isMobile ? 150 : 180,
+    width: isMobile ? 150 : 180,
     textAlign: 'left',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   treeLabelContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    width: '100%',
   },
   collapseButton: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
+    width: 16,
+    height: 16,
+    borderRadius: 3,
     borderWidth: 1,
     borderColor: '#38BDF8',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
+    marginRight: 6,
     backgroundColor: 'transparent',
   },
   collapseButtonExpanded: {
@@ -1360,32 +1463,48 @@ const createStyles = (isMobile: boolean) => StyleSheet.create({
   },
   collapseButtonText: {
     color: '#38BDF8',
-    fontSize: 12,
+    fontSize: 9,
     fontWeight: '700',
-    lineHeight: 12,
+    lineHeight: 9,
   },
   collapseButtonTextExpanded: {
     color: '#0F172A',
   },
   collapsePlaceholder: {
-    width: 22,
-    height: 22,
-    marginRight: 8,
+    width: 16,
+    height: 16,
+    marginRight: 6,
   },
   labelText: {
-    color: '#F8FAFC',
     fontSize: 13,
+    color: '#FFFFFF', // 默认颜色，会被层级样式覆盖
+  },
+  labelTextLevel0: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  labelTextLevel1: {
+    color: '#E2E8F0',
+    fontWeight: '500',
+  },
+  labelTextLevel2: {
+    color: '#CBD5F5',
+    fontWeight: '400',
+  },
+  labelTextLevel3: {
+    color: '#94A3B8',
+    fontWeight: '400',
   },
   totalColumn: {
-    minWidth: 96,
+    minWidth: isMobile ? 80 : 96,
+    width: isMobile ? 80 : 96,
+    flexShrink: 0,
   },
   forecastCertainValue: {
     color: '#34D399',
-    fontSize: 12,
   },
   forecastUncertainValue: {
     color: '#F97316',
-    fontSize: 12,
   },
   cashflowCheckboxes: {
     flexDirection: isMobile ? 'column' : 'row',

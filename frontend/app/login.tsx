@@ -20,7 +20,7 @@ import { useAuthStore } from '@/src/state/authStore'
 export default function LoginScreen() {
   const router = useRouter()
   const { login, isAuthenticated, isLoading, checkAuth } = useAuthStore()
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [rememberMe, setRememberMe] = useState(false)
 
@@ -36,16 +36,16 @@ export default function LoginScreen() {
   }, [isAuthenticated, router])
 
   const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
-      Alert.alert('错误', '请输入邮箱和密码')
+    if (!username.trim() || !password.trim()) {
+      Alert.alert('错误', '请输入用户名和密码')
       return
     }
 
     try {
-      await login(email.trim(), password, rememberMe)
+      await login(username.trim(), password, rememberMe)
       router.replace('/(app)/dashboard')
     } catch (error: any) {
-      const message = error?.body || error?.message || '登录失败，请检查邮箱和密码'
+      const message = error?.body || error?.message || '登录失败，请检查用户名和密码'
       if (Platform.OS === 'web') {
         alert(message)
       } else {
@@ -67,16 +67,15 @@ export default function LoginScreen() {
 
             <View style={styles.form}>
               <View style={styles.inputGroup}>
-                <Text style={styles.label}>邮箱</Text>
+                <Text style={styles.label}>用户名</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="请输入邮箱"
+                  placeholder="请输入用户名"
                   placeholderTextColor="#64748B"
-                  value={email}
-                  onChangeText={setEmail}
+                  value={username}
+                  onChangeText={setUsername}
                   autoCapitalize="none"
-                  keyboardType="email-address"
-                  autoComplete="email"
+                  autoComplete="username"
                   editable={!isLoading}
                 />
               </View>

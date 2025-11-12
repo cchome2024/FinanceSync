@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { apiClient } from '@/src/services/apiClient'
 import { useFinanceStore } from '@/src/state/financeStore'
+import { useAuthStore } from '@/src/state/authStore'
 import { NavLink } from '@/components/common/NavLink'
 
 type AnalysisResponse = {
@@ -17,6 +18,7 @@ const generateId = () => Math.random().toString(36).slice(2)
 export default function AnalysisChatScreen() {
   const [messageInput, setMessageInput] = useState('')
   const { analysisChat, analysisLoading, addAnalysisMessage, setAnalysisLoading } = useFinanceStore()
+  const hasPermission = useAuthStore((state) => state.hasPermission)
 
   const handleSend = useCallback(async () => {
     if (!messageInput.trim()) {
@@ -74,7 +76,9 @@ export default function AnalysisChatScreen() {
           </View>
           <View style={styles.links}>
             <NavLink href="/(app)/dashboard" label="财务看板" textStyle={styles.historyLink} />
-            <NavLink href="/(app)/import" label="数据录入" textStyle={styles.historyLink} />
+            {hasPermission('data:import') && (
+              <NavLink href="/(app)/import" label="数据录入" textStyle={styles.historyLink} />
+            )}
           </View>
         </View>
 

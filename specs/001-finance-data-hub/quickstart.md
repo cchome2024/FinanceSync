@@ -53,6 +53,33 @@ poetry run python scripts/create_user.py viewer@example.com password123 "查看�
 poetry run python scripts/create_user.py viewer@example.com password123 "查看者"
 ```
 
+#### 列举所有用户
+```bash
+cd backend
+poetry run python scripts/list_users.py
+```
+
+该命令会显示所有用户的详细信息，包括：
+- 用户ID、邮箱、显示名称
+- 角色、状态（激活/禁用）
+- 创建时间
+- 统计信息（总用户数、角色分布等）
+
+#### 转换用户角色
+```bash
+cd backend
+# 通过邮箱转换角色
+poetry run python scripts/change_user_role.py user@example.com admin
+
+# 通过显示名称转换角色
+poetry run python scripts/change_user_role.py "财务人员" finance
+```
+
+角色选项：
+- `admin` - 管理员（所有权限）
+- `finance` - 财务人员（录入、确认、查看、导出）
+- `viewer` - 查看者（仅查看和导出）
+
 ### 用户角色说明
 
 | 角色 | 权限 |
@@ -64,10 +91,14 @@ poetry run python scripts/create_user.py viewer@example.com password123 "查看�
 ### 通过 API 注册用户（需要管理员权限）
 
 ```bash
-# 1. 管理员登录获取 token
+# 1. 管理员登录获取 token（支持用户名或邮箱登录）
 curl -X POST "http://localhost:8000/api/v1/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{"email": "admin@example.com", "password": "password123"}'
+  -d '{"username": "admin@example.com", "password": "password123"}'
+# 或者使用显示名称登录
+curl -X POST "http://localhost:8000/api/v1/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "管理员", "password": "password123"}'
 
 # 2. 使用 token 注册新用户
 curl -X POST "http://localhost:8000/api/v1/auth/register" \
@@ -119,6 +150,14 @@ poetry run python scripts/create_admin.py <email> <password> <display_name>
 # 创建用户（支持所有角色）
 poetry run python scripts/create_user.py <email> <password> <display_name> [role]
 # 角色选项: admin, finance, viewer（默认）
+
+# 列举所有用户
+poetry run python scripts/list_users.py
+
+# 转换用户角色
+poetry run python scripts/change_user_role.py <email_or_username> <new_role>
+# 支持通过邮箱或显示名称查找用户
+# 角色选项: admin, finance, viewer
 ```
 
 ### 开发工具

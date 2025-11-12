@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, require_permission
 from app.core.permissions import Permission
-from app.models.financial import User, Certainty
+from app.models.financial import User, Certainty, ExpenseForecast
 from app.repositories.expense_forecast import ExpenseForecastRepository
 from app.schemas.expense_forecast import ExpenseForecastCreate, ExpenseForecastUpdate, ExpenseForecastResponse
 
@@ -115,4 +115,20 @@ def delete_expense_forecast(
     
     repo.session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/expense-forecasts", status_code=status.HTTP_200_OK)
+def clear_expense_forecasts(
+    session: Session = Depends(get_db_session),
+) -> dict[str, int]:
+    """清空所有预测支出记录"""
+    try:
+        count = session.query(ExpenseForecast).delete()
+        session.commit()
+        print(f"[IMPORT] Cleared {count} expense forecast records")
+        return {"deleted_count": count}
+    except Exception as e:
+        session.rollback()
+        print(f"[IMPORT] Failed to clear expense forecasts: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to clear expense forecasts: {str(e)}") from e
 

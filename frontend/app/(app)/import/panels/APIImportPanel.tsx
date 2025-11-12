@@ -48,6 +48,7 @@ export function APIImportPanel() {
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState<string | null>(null)
   const [clearing, setClearing] = useState(false)
+  const [clearingExpense, setClearingExpense] = useState(false)
 
   const { addImportMessage, setImportPreview, setCurrentJobId } = useFinanceStore()
 
@@ -176,6 +177,61 @@ export function APIImportPanel() {
     }
   }, [handleClearIncomeForecastsConfirm])
 
+  const handleClearExpenseForecastsConfirm = useCallback(async () => {
+    setClearingExpense(true)
+    try {
+      const baseURL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
+      const response = await fetch(`${baseURL}/api/v1/expense-forecasts`, {
+        method: 'DELETE',
+        headers: {
+          Accept: 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        let errorMessage = `清空失败: ${response.status}`
+        try {
+          const errorJson = JSON.parse(errorText)
+          errorMessage = errorJson.detail || errorMessage
+        } catch {
+          errorMessage = errorText || errorMessage
+        }
+        throw new Error(errorMessage)
+      }
+
+      const result: { deleted_count: number } = await response.json()
+      console.log('[API IMPORT] Clear expense forecasts response:', result)
+
+      addImportMessage({
+        id: generateId(),
+        role: 'assistant',
+        content: `已清空 ${result.deleted_count} 条预测支出记录。`,
+        createdAt: new Date().toISOString(),
+      })
+
+      Alert.alert('清空成功', `已清空 ${result.deleted_count} 条预测支出记录。`)
+    } catch (error) {
+      console.error('[API IMPORT] clear expense forecasts error', error)
+      Alert.alert('清空失败', error instanceof Error ? error.message : '未知错误')
+    } finally {
+      setClearingExpense(false)
+    }
+  }, [addImportMessage])
+
+  const handleClearExpenseForecasts = useCallback(() => {
+    if (Platform.OS === 'web') {
+      if (window.confirm('确定要清空所有预测支出记录吗？此操作不可恢复！')) {
+        void handleClearExpenseForecastsConfirm()
+      }
+    } else {
+      Alert.alert('确认清空', '确定要清空所有预测支出记录吗？此操作不可恢复！', [
+        { text: '取消', style: 'cancel' },
+        { text: '确认', style: 'destructive', onPress: () => void handleClearExpenseForecastsConfirm() },
+      ])
+    }
+  }, [handleClearExpenseForecastsConfirm])
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -193,17 +249,30 @@ export function APIImportPanel() {
             <Text style={styles.descriptionText}>配置 API 数据源，自动或手动同步预期收入数据</Text>
             <Text style={styles.descriptionHint}>第一阶段主要处理预期收入数据</Text>
           </View>
-          <TouchableOpacity
-            style={[styles.clearButton, clearing && styles.clearButtonDisabled]}
-            onPress={handleClearIncomeForecasts}
-            disabled={clearing}
-          >
-            {clearing ? (
-              <ActivityIndicator color="#FFFFFF" size="small" />
-            ) : (
-              <Text style={styles.clearButtonText}>清空预测收入表</Text>
-            )}
-          </TouchableOpacity>
+          <View style={styles.clearButtonsContainer}>
+            <TouchableOpacity
+              style={[styles.clearButton, clearing && styles.clearButtonDisabled]}
+              onPress={handleClearIncomeForecasts}
+              disabled={clearing}
+            >
+              {clearing ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={styles.clearButtonText}>清空预测收入表</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.clearButton, clearingExpense && styles.clearButtonDisabled]}
+              onPress={handleClearExpenseForecasts}
+              disabled={clearingExpense}
+            >
+              {clearingExpense ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={styles.clearButtonText}>清空预测支出表</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -313,12 +382,16 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 12,
   },
+  clearButtonsContainer: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
   clearButton: {
     backgroundColor: '#EF4444',
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    marginLeft: 12,
   },
   clearButtonDisabled: {
     opacity: 0.7,

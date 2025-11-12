@@ -3,14 +3,21 @@ import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from '
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { useFinanceStore } from '@/src/state/financeStore'
+import { useAuthStore } from '@/src/state/authStore'
 import { NavLink } from '@/components/common/NavLink'
 
 export default function HistoryScreen() {
   const { importChat, analysisChat, importPreview, reset } = useFinanceStore()
+  const hasPermission = useAuthStore((state) => state.hasPermission)
 
   const hasData = importChat.length > 0 || analysisChat.length > 0 || importPreview.length > 0
-  const importMessages = useMemo(() => importChat, [importChat])
-  const analysisMessages = useMemo(() => analysisChat, [analysisChat])
+  // 按操作时间倒序排列
+  const importMessages = useMemo(() => {
+    return [...importChat].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  }, [importChat])
+  const analysisMessages = useMemo(() => {
+    return [...analysisChat].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  }, [analysisChat])
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -22,7 +29,9 @@ export default function HistoryScreen() {
           </View>
           <View style={styles.links}>
             <NavLink href="/(app)/dashboard" label="财务看板" textStyle={styles.link} />
-            <NavLink href="/(app)/import" label="数据录入" textStyle={styles.link} />
+            {hasPermission('data:import') && (
+              <NavLink href="/(app)/import" label="数据录入" textStyle={styles.link} />
+            )}
             <NavLink href="/(app)/analysis" label="查询分析" textStyle={styles.link} />
           </View>
         </View>

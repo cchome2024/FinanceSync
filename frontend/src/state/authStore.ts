@@ -19,7 +19,7 @@ interface AuthState {
   user: User | null
   isAuthenticated: boolean
   isLoading: boolean
-  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>
+  login: (username: string, password: string, rememberMe?: boolean) => Promise<void>
   logout: () => Promise<void>
   checkAuth: () => Promise<void>
   hasPermission: (permission: string) => boolean
@@ -87,12 +87,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isAuthenticated: false,
   isLoading: false,
 
-  login: async (email: string, password: string, rememberMe: boolean = false) => {
-    console.log('[Auth] Logging in...', { email, rememberMe })
+  login: async (username: string, password: string, rememberMe: boolean = false) => {
+    console.log('[Auth] Logging in...', { username, rememberMe })
     set({ isLoading: true })
     try {
       const response = await apiClient.post<{ access_token: string; user: User }>('/api/v1/auth/login', {
-        email,
+        username,
         password,
         remember_me: rememberMe,
       })

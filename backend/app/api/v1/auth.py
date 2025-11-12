@@ -47,13 +47,16 @@ def login(
     credentials: UserLogin,
     session: Session = Depends(get_db_session),
 ) -> TokenResponse:
-    """用户登录"""
-    user = session.query(User).filter(User.email == credentials.email).first()
+    """用户登录（支持用户名或邮箱登录）"""
+    # 尝试通过display_name（用户名）或email登录
+    user = session.query(User).filter(
+        (User.display_name == credentials.username) | (User.email == credentials.username)
+    ).first()
     
     if not user or not verify_password(credentials.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password"
+            detail="Incorrect username or password"
         )
     
     if not user.is_active:

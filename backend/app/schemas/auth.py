@@ -13,7 +13,7 @@ class UserCreate(BaseModel):
 
 
 class UserLogin(BaseModel):
-    email: EmailStr
+    username: str  # 用户名（可以是display_name或email）
     password: str
     remember_me: bool = False  # 记住我选项，默认 False
 

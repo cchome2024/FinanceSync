@@ -70,7 +70,12 @@ export default function ImportScreen() {
     })
   }, [])
 
-  const messages = useMemo(() => importChat.slice(-50), [importChat]) // 显示最近50条
+  const messages = useMemo(() => {
+    // 按操作时间倒序排列，显示最近50条
+    return [...importChat]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 50)
+  }, [importChat])
 
   const executeConfirm = useCallback(
     async (forceOverwrite = false) => {
@@ -200,126 +205,132 @@ export default function ImportScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.title}>数据录入</Text>
-            <Text style={styles.subtitle}>选择输入方式，导入财务数据</Text>
-          </View>
-          <View style={styles.links}>
-            <NavLink href="/(app)/dashboard" label="财务看板" textStyle={styles.link} />
-            <NavLink href="/(app)/analysis" label="查询分析" textStyle={styles.link} />
-            <NavLink href="/(app)/history" label="历史记录" textStyle={styles.link} />
-          </View>
-        </View>
-
-        {/* 标签页切换 */}
-        <View style={styles.tabs}>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'ai' && styles.tabActive]}
-            onPress={() => setActiveTab('ai')}
-          >
-            <Text style={[styles.tabText, activeTab === 'ai' && styles.tabTextActive]}>AI输入</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'file' && styles.tabActive]}
-            onPress={() => setActiveTab('file')}
-          >
-            <Text style={[styles.tabText, activeTab === 'file' && styles.tabTextActive]}>文件上传</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'api' && styles.tabActive]}
-            onPress={() => setActiveTab('api')}
-          >
-            <Text style={[styles.tabText, activeTab === 'api' && styles.tabTextActive]}>API同步</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* 内容区域 */}
-        <View style={styles.contentWrapper}>
-          {/* 统一的历史记录区域 - 占据原来AI聊天区的空间，所有标签页都可见 */}
-          <View style={styles.historySection}>
-            <View style={styles.historyHeader}>
-              <Text style={styles.historyTitle}>历史记录 {messages.length > 0 && `(${messages.length})`}</Text>
+      <ScrollView 
+        style={styles.scrollView} 
+        contentContainerStyle={styles.scrollViewContent}
+        showsVerticalScrollIndicator={true}
+      >
+        <View style={styles.container}>
+          <View style={styles.header}>
+            <View>
+              <Text style={styles.title}>数据录入</Text>
+              <Text style={styles.subtitle}>选择输入方式，导入财务数据</Text>
             </View>
-            {messages.length > 0 ? (
-              <ScrollView style={styles.historyContainer} contentContainerStyle={styles.historyContainerContent}>
-                {messages.map((message) => {
-                  const isExpanded = expandedMessages.has(message.id)
-                  const isLongMessage = message.content.length > MAX_PREVIEW_LENGTH
-                  const displayContent = isExpanded || !isLongMessage ? message.content : truncateMessage(message.content, MAX_PREVIEW_LENGTH)
+            <View style={styles.links}>
+              <NavLink href="/(app)/dashboard" label="财务看板" textStyle={styles.link} />
+              <NavLink href="/(app)/analysis" label="查询分析" textStyle={styles.link} />
+              <NavLink href="/(app)/history" label="历史记录" textStyle={styles.link} />
+            </View>
+          </View>
 
-                  return (
-                    <View key={message.id} style={styles.messageBubble}>
-                      <View style={styles.messageHeader}>
-                        <Text style={styles.messageContent}>{displayContent}</Text>
-                        <Text style={styles.messageTime}>{formatMessageTime(message.createdAt)}</Text>
+          {/* 标签页切换 */}
+          <View style={styles.tabs}>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'ai' && styles.tabActive]}
+              onPress={() => setActiveTab('ai')}
+            >
+              <Text style={[styles.tabText, activeTab === 'ai' && styles.tabTextActive]}>AI输入</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'file' && styles.tabActive]}
+              onPress={() => setActiveTab('file')}
+            >
+              <Text style={[styles.tabText, activeTab === 'file' && styles.tabTextActive]}>文件上传</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'api' && styles.tabActive]}
+              onPress={() => setActiveTab('api')}
+            >
+              <Text style={[styles.tabText, activeTab === 'api' && styles.tabTextActive]}>API同步</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* 内容区域 */}
+          <View style={styles.contentWrapper}>
+            {/* 统一的历史记录区域 - 占据原来AI聊天区的空间，所有标签页都可见 */}
+            <View style={styles.historySection}>
+              <View style={styles.historyHeader}>
+                <Text style={styles.historyTitle}>历史记录 {messages.length > 0 && `(${messages.length})`}</Text>
+              </View>
+              {messages.length > 0 ? (
+                <ScrollView style={styles.historyContainer} contentContainerStyle={styles.historyContainerContent}>
+                  {messages.map((message) => {
+                    const isExpanded = expandedMessages.has(message.id)
+                    const isLongMessage = message.content.length > MAX_PREVIEW_LENGTH
+                    const displayContent = isExpanded || !isLongMessage ? message.content : truncateMessage(message.content, MAX_PREVIEW_LENGTH)
+
+                    return (
+                      <View key={message.id} style={styles.messageBubble}>
+                        <View style={styles.messageHeader}>
+                          <Text style={styles.messageContent}>{displayContent}</Text>
+                          <Text style={styles.messageTime}>{formatMessageTime(message.createdAt)}</Text>
+                        </View>
+                        {isLongMessage && (
+                          <TouchableOpacity
+                            style={styles.expandButton}
+                            onPress={() => toggleMessageExpanded(message.id)}
+                          >
+                            <Text style={styles.expandButtonText}>
+                              {isExpanded ? '收起' : '展开查看完整内容'}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
                       </View>
-                      {isLongMessage && (
-                        <TouchableOpacity
-                          style={styles.expandButton}
-                          onPress={() => toggleMessageExpanded(message.id)}
-                        >
-                          <Text style={styles.expandButtonText}>
-                            {isExpanded ? '收起' : '展开查看完整内容'}
-                          </Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  )
-                })}
-              </ScrollView>
+                    )
+                  })}
+                </ScrollView>
+              ) : (
+                <View style={styles.historyEmpty}>
+                  <Text style={styles.historyEmptyText}>暂无历史记录</Text>
+                </View>
+              )}
+            </View>
+
+            {/* 标签页内容区域 */}
+            {activeTab === 'ai' ? (
+              <View style={styles.aiPanelWrapper}>
+                <AIImportPanel />
+              </View>
             ) : (
-              <View style={styles.historyEmpty}>
-                <Text style={styles.historyEmptyText}>暂无历史记录</Text>
+              <View style={styles.content}>
+                {activeTab === 'file' && <FileImportPanel />}
+                {activeTab === 'api' && <APIImportPanel />}
               </View>
             )}
           </View>
 
-          {/* 标签页内容区域 */}
-          {activeTab === 'ai' ? (
-            <View style={styles.aiPanelWrapper}>
-              <AIImportPanel />
-            </View>
-          ) : (
-            <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-              {activeTab === 'file' && <FileImportPanel />}
-              {activeTab === 'api' && <APIImportPanel />}
-            </ScrollView>
-          )}
-        </View>
-
-        {/* 统一的预览和确认区域 */}
-        <View style={styles.previewSection}>
-          <ImportPreview records={importPreview} />
-          {pendingOverwriteMessage && (
-            <View style={styles.overwriteBanner}>
-              <Text style={styles.overwriteText}>{pendingOverwriteMessage}</Text>
-              <View style={styles.overwriteButtonContainer}>
-                <TouchableOpacity
-                  style={styles.overwriteButton}
-                  onPress={() => {
-                    setPendingOverwriteMessage(null)
-                    void executeConfirm(true)
-                  }}
-                  disabled={isConfirming}
-                >
-                  {isConfirming ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.overwriteButtonText}>覆盖入库</Text>}
-                </TouchableOpacity>
+          {/* 统一的预览和确认区域 */}
+          <View style={styles.previewSection}>
+            <ImportPreview records={importPreview} />
+            {pendingOverwriteMessage && (
+              <View style={styles.overwriteBanner}>
+                <Text style={styles.overwriteText}>{pendingOverwriteMessage}</Text>
+                <View style={styles.overwriteButtonContainer}>
+                  <TouchableOpacity
+                    style={styles.overwriteButton}
+                    onPress={() => {
+                      setPendingOverwriteMessage(null)
+                      void executeConfirm(true)
+                    }}
+                    disabled={isConfirming}
+                  >
+                    {isConfirming ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.overwriteButtonText}>覆盖入库</Text>}
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
-          )}
-          {importPreview.length > 0 && !pendingOverwriteMessage && (
-            <TouchableOpacity
-              style={[styles.confirmButton, (isConfirming || importPreview.length === 0) && styles.confirmButtonDisabled]}
-              onPress={handleConfirm}
-              disabled={isConfirming || importPreview.length === 0}
-            >
-              {isConfirming ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.confirmButtonText}>确认入库</Text>}
-            </TouchableOpacity>
-          )}
+            )}
+            {importPreview.length > 0 && !pendingOverwriteMessage && (
+              <TouchableOpacity
+                style={[styles.confirmButton, (isConfirming || importPreview.length === 0) && styles.confirmButtonDisabled]}
+                onPress={handleConfirm}
+                disabled={isConfirming || importPreview.length === 0}
+              >
+                {isConfirming ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.confirmButtonText}>确认入库</Text>}
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   )
 }
@@ -329,8 +340,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0F1420',
   },
-  container: {
+  scrollView: {
     flex: 1,
+  },
+  scrollViewContent: {
+    flexGrow: 1,
+  },
+  container: {
     paddingHorizontal: 16,
     paddingBottom: 16,
   },
@@ -386,16 +402,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   contentWrapper: {
-    flex: 1,
     flexDirection: 'column',
     gap: 16,
   },
   historySection: {
-    flex: 1, // 占据原来AI聊天区的全部空间
     backgroundColor: '#131A2B',
     borderRadius: 12,
     overflow: 'hidden',
-    minHeight: 300, // 最小高度
+    height: 200, // 固定高度，避免占据过多空间
+    maxHeight: 300, // 最大高度
   },
   historyHeader: {
     padding: 12,
@@ -458,13 +473,10 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   content: {
-    flexShrink: 0, // 不收缩，固定大小
-  },
-  contentContainer: {
-    paddingBottom: 16,
+    // 移除 flexShrink，让内容自然扩展
   },
   aiPanelWrapper: {
-    flexShrink: 0, // 不收缩，固定大小
+    // 移除 flexShrink，让内容自然扩展
   },
   previewSection: {
     marginTop: 16,

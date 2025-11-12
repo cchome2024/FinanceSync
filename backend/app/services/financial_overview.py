@@ -108,31 +108,31 @@ class FinancialOverviewService:
         if not company_ids:
             return
 
-        cutoff = datetime.combine(as_of, datetime.max.time(), tzinfo=UTC)
+        # 总是取 reported_at 最新的记录，不管日期是什么（支持未来日期的余额数据）
+        # 直接查询所有记录，按 reported_at 降序排序，然后只取每个公司的第一条（最新的）
         stmt = (
             select(AccountBalance)
             .where(AccountBalance.company_id.in_(company_ids))
-            .where(AccountBalance.reported_at <= cutoff)
             .order_by(AccountBalance.company_id, AccountBalance.reported_at.desc())
         )
         latest: Dict[str, AccountBalance] = {}
-        for balance, in self._session.execute(stmt):
+        all_balances = list(self._session.execute(stmt).scalars().all())
+        
+        # 调试日志：打印所有查询到的余额记录
+        print(f"[BALANCE QUERY] Found {len(all_balances)} balance records for companies: {company_ids}")
+        for balance in all_balances:
+            print(f"[BALANCE QUERY] Company: {balance.company_id}, reported_at: {balance.reported_at}, total: {balance.total_balance}")
+        
+        for balance in all_balances:
+            # 只取每个公司的第一条记录（因为已经按 reported_at.desc() 排序，第一条就是最新的）
             if balance.company_id not in latest:
                 latest[balance.company_id] = balance
-
-        missing_ids = [aggregate.company.id for aggregate in aggregates if aggregate.company.id not in latest]
-        if missing_ids:
-            fallback_stmt = (
-                select(AccountBalance)
-                .where(AccountBalance.company_id.in_(missing_ids))
-                .order_by(AccountBalance.company_id, AccountBalance.reported_at.desc())
-            )
-            for balance, in self._session.execute(fallback_stmt):
-                if balance.company_id not in latest:
-                    latest[balance.company_id] = balance
+                print(f"[BALANCE QUERY] Selected latest for company {balance.company_id}: reported_at={balance.reported_at}, total={balance.total_balance}")
 
         for aggregate in aggregates:
             aggregate.balance = latest.get(aggregate.company.id)
+            if aggregate.balance:
+                print(f"[BALANCE QUERY] Assigned balance to company {aggregate.company.id}: reported_at={aggregate.balance.reported_at}, total={aggregate.balance.total_balance}")
 
     def _attach_latest_revenue(self, aggregates: Iterable[_CompanyAggregates], as_of: date) -> None:
         company_ids = [aggregate.company.id for aggregate in aggregates]
