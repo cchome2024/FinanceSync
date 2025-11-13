@@ -186,9 +186,9 @@ DATABASE_URL=sqlite:///./finance_sync.db
 JWT_SECRET_KEY=your-secret-key-change-in-production
 
 # LLM 配置
-LLM_PROVIDER=azure_openai
-LLM_ENDPOINT=https://example.openai.azure.com
-LLM_DEPLOYMENT=gpt-4o
+LLM_PROVIDER=deepseek
+LLM_ENDPOINT=https://api.deepseek.com
+LLM_DEPLOYMENT=deepseek-chat
 LLM_API_KEY=your-api-key
 LLM_TIMEOUT_SECONDS=120
 

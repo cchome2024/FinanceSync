@@ -28,6 +28,7 @@ class ImportSource(str, enum.Enum):
     MANUAL_UPLOAD = "manual_upload"
     WATCHED_DIR = "watched_dir"
     AI_CHAT = "ai_chat"
+    API_SYNC = "api_sync"
 
 
 class ImportStatus(str, enum.Enum):

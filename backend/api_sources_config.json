@@ -1,0 +1,12 @@
+{
+  "sources": [
+    {
+      "id": "sqlserver-expense-forecast",
+      "name": "SQL Server - 应付管理人报酬",
+      "apiType": "sqlserver",
+      "enabled": true,
+      "lastRunAt": "2025-11-13T17:56:57.343576",
+      "schedule": null
+    }
+  ]
+}
