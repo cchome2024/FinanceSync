@@ -218,6 +218,7 @@ export function APIImportPanel() {
   const [clearingExpense, setClearingExpense] = useState(false)
   const [rawData, setRawData] = useState<Record<string, RawDataItem[]>>({})
   const [editedData, setEditedData] = useState<Record<string, ProcessedDataItem[]>>({})
+  const [confirming, setConfirming] = useState<Record<string, boolean>>({})
 
   const { addImportMessage, setImportPreview, setCurrentJobId } = useFinanceStore()
 
@@ -250,14 +251,15 @@ export function APIImportPanel() {
         const response = await apiClient.post<TriggerResponse>(`/api/v1/api-sources/${sourceId}/trigger`)
         console.log('[API IMPORT] sync response', response)
         setCurrentJobId(response.jobId)
-        const previewRecords = response.preview.map((record, index) => ({
-          id: `${response.jobId}-${index}`,
-          recordType: record.recordType as any,
-          payload: record.payload,
-          confidence: record.confidence,
-          warnings: record.warnings ?? [],
-        }))
-        setImportPreview(previewRecords)
+        // API导入面板不使用统一的预览和确认区域，所以不需要设置importPreview
+        // const previewRecords = response.preview.map((record, index) => ({
+        //   id: `${response.jobId}-${index}`,
+        //   recordType: record.recordType as any,
+        //   payload: record.payload,
+        //   confidence: record.confidence,
+        //   warnings: record.warnings ?? [],
+        // }))
+        // setImportPreview(previewRecords)
 
         // 保存原始查询结果数据，并进行处理
         if (response.rawResponse && 'raw_data' in response.rawResponse && Array.isArray(response.rawResponse.raw_data)) {
@@ -285,7 +287,7 @@ export function APIImportPanel() {
         addImportMessage({
           id: generateId(),
           role: 'assistant',
-          content: `API 同步完成，识别到 ${response.preview.length} 条记录。请在下方候选记录列表中确认内容。`,
+          content: `API 同步完成，获取到 ${response.rawResponse?.raw_data?.length || 0} 条记录。请在下方表格中查看和编辑数据，然后点击"确认入库"按钮。`,
           createdAt: new Date().toISOString(),
         })
 
@@ -571,6 +573,49 @@ export function APIImportPanel() {
                   }))
                 }
                 
+                const handleConfirmConfirm = async () => {
+                  setConfirming((prev) => ({ ...prev, [item.id]: true }))
+                  try {
+                    // 过滤出预计收入非0的数据
+                    const dataToImport = currentData.filter((row) => {
+                      const amount = row.expectedAmount || 0
+                      return amount !== 0 && amount !== null && amount !== undefined
+                    })
+                    
+                    const response = await apiClient.post<{ deleted_count: number; imported_count: number }>(
+                      `/api/v1/api-sources/${item.id}/confirm`,
+                      { data: dataToImport }
+                    )
+                    
+                    addImportMessage({
+                      id: generateId(),
+                      role: 'assistant',
+                      content: `确认入库完成：删除了 ${response.deleted_count} 条旧记录，导入了 ${response.imported_count} 条新记录。`,
+                      createdAt: new Date().toISOString(),
+                    })
+                    
+                    Alert.alert('入库成功', `删除了 ${response.deleted_count} 条旧记录，导入了 ${response.imported_count} 条新记录。`)
+                  } catch (error) {
+                    console.error('[API IMPORT] confirm error', error)
+                    Alert.alert('入库失败', error instanceof Error ? error.message : '未知错误')
+                  } finally {
+                    setConfirming((prev) => ({ ...prev, [item.id]: false }))
+                  }
+                }
+                
+                const handleConfirm = () => {
+                  if (Platform.OS === 'web') {
+                    if (window.confirm('确认入库将删除所有一级分类为"资产管理"的预计收入数据，然后导入当前数据。确定要继续吗？')) {
+                      void handleConfirmConfirm()
+                    }
+                  } else {
+                    Alert.alert('确认入库', '确认入库将删除所有一级分类为"资产管理"的预计收入数据，然后导入当前数据。确定要继续吗？', [
+                      { text: '取消', style: 'cancel' },
+                      { text: '确认', style: 'destructive', onPress: () => void handleConfirmConfirm() },
+                    ])
+                  }
+                }
+                
                 return (
                   <View style={styles.rawDataContainer}>
                     <View style={styles.rawDataTitleRow}>
@@ -590,6 +635,20 @@ export function APIImportPanel() {
                         </Text>
                       </View>
                     </View>
+                    <TouchableOpacity
+                      style={[styles.confirmImportButton, confirming[item.id] && styles.confirmImportButtonDisabled]}
+                      onPress={handleConfirm}
+                      disabled={confirming[item.id]}
+                    >
+                      {confirming[item.id] ? (
+                        <>
+                          <ActivityIndicator color="#FFFFFF" size="small" />
+                          <Text style={styles.confirmImportButtonText}>入库中...</Text>
+                        </>
+                      ) : (
+                        <Text style={styles.confirmImportButtonText}>确认入库</Text>
+                      )}
+                    </TouchableOpacity>
                     <View style={styles.tableWrapper}>
                       <ScrollView horizontal showsHorizontalScrollIndicator={true}>
                         <View>
@@ -1109,6 +1168,25 @@ const styles = StyleSheet.create({
   tableCellIncomeStatus: {
     width: 140,
     minWidth: 140,
+  },
+  confirmImportButton: {
+    marginTop: 12,
+    backgroundColor: '#22C55E',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  confirmImportButtonDisabled: {
+    opacity: 0.7,
+  },
+  confirmImportButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 })
 

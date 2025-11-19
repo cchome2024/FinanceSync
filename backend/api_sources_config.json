@@ -5,7 +5,7 @@
       "name": "SQL Server - 应付管理人报酬",
       "apiType": "sqlserver",
       "enabled": true,
-      "lastRunAt": "2025-11-19T14:50:21.334917",
+      "lastRunAt": "2025-11-19T15:50:27.049334",
       "schedule": null
     }
   ]

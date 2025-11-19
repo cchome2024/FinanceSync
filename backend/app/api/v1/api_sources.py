@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, get_import_job_repository, require_permission
 from app.core.config import get_settings
 from app.core.permissions import Permission
-from app.models.financial import ImportSource, ImportStatus, User
+from app.models.financial import Certainty, Company, ImportSource, ImportStatus, IncomeForecast, User
 from app.repositories.import_jobs import ImportJobRepository
 from app.schemas.imports import CandidateRecord, ParseJobResponse
 from app.services.api_source import ApiSourceConfig, SqlServerDataSource
+from app.services.category_service import FinanceCategoryService
 
 router = APIRouter(prefix="/api/v1", tags=["api-sources"])
 
@@ -241,13 +243,192 @@ def trigger_api_source(
             repo.session.add(job)
             repo.session.commit()
             print(f"[API SOURCE] Failed to fetch data: {e}")
+            
+            # 检查是否是连接错误
+            error_str = str(e).lower()
+            if 'connection refused' in error_str or 'unable to connect' in error_str or 'unavailable' in error_str:
+                error_detail = (
+                    f"无法连接到 SQL Server 数据库 ({settings.sqlserver_host}:{settings.sqlserver_port or 1433})。\n"
+                    f"请检查：\n"
+                    f"1. SQL Server 服务是否正在运行\n"
+                    f"2. 网络连接是否正常\n"
+                    f"3. 防火墙是否允许连接\n"
+                    f"4. 服务器地址和端口是否正确\n"
+                    f"原始错误: {str(e)}"
+                )
+            elif 'login failed' in error_str or 'authentication' in error_str:
+                error_detail = (
+                    f"SQL Server 认证失败。\n"
+                    f"请检查用户名和密码是否正确。\n"
+                    f"原始错误: {str(e)}"
+                )
+            else:
+                error_detail = f"从 SQL Server 获取数据失败: {str(e)}"
+            
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to fetch data from SQL Server: {str(e)}"
+                detail=error_detail
             ) from e
     else:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"API source not found: {source_id}"
         )
+
+
+class ApiSourceConfirmRequest(BaseModel):
+    """API数据源确认入库请求"""
+    data: List[Dict[str, Any]]  # 编辑后的数据列表
+
+
+class ApiSourceConfirmResponse(BaseModel):
+    """API数据源确认入库响应"""
+    deleted_count: int
+    imported_count: int
+
+
+@router.post(
+    "/api-sources/{source_id}/confirm",
+    response_model=ApiSourceConfirmResponse,
+    status_code=status.HTTP_200_OK,
+)
+def confirm_api_source(
+    source_id: str,
+    payload: ApiSourceConfirmRequest,
+    user: User = Depends(require_permission(Permission.DATA_IMPORT)),
+    session: Session = Depends(get_db_session),
+) -> ApiSourceConfirmResponse:
+    """确认API数据源入库：删除所有一级分类为'资产管理'的预计收入数据，然后导入新数据"""
+    if source_id != "sqlserver-expense-forecast":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"API source not found: {source_id}"
+        )
+    
+    try:
+        # 1. 删除所有一级分类为"资产管理"的预计收入数据
+        deleted_count = session.query(IncomeForecast).filter(
+            IncomeForecast.category_path_text.like('资产管理%')
+        ).delete(synchronize_session=False)
+        session.commit()
+        print(f"[API SOURCE] Deleted {deleted_count} income forecasts with category '资产管理'")
+        
+        # 2. 获取或创建公司
+        company = session.query(Company).filter(Company.name == "company-unknown").first()
+        if not company:
+            company = Company(name="company-unknown", display_name="未知公司")
+            session.add(company)
+            session.flush()
+        
+        # 3. 获取分类服务
+        category_service = FinanceCategoryService(session)
+        
+        # 4. 创建导入任务
+        repo = ImportJobRepository(session)
+        job = repo.create_job(
+            source_type=ImportSource.API_SYNC,
+            user_id=user.id,
+            initiator_id=user.id,
+            initiator_role=user.role.value,
+        )
+        
+        # 5. 导入预计收入非0的数据
+        imported_count = 0
+        for item in payload.data:
+            # 只导入预计收入非0的数据
+            expected_amount = item.get('expectedAmount') or item.get('expected_amount') or 0
+            if expected_amount == 0 or expected_amount is None:
+                continue
+            
+            # 解析日期
+            date_str = item.get('Date') or item.get('date')
+            if not date_str:
+                continue
+            
+            try:
+                if isinstance(date_str, str):
+                    # 尝试多种日期格式
+                    try:
+                        cash_in_date = datetime.fromisoformat(date_str.replace('Z', '+00:00')).date()
+                    except:
+                        try:
+                            cash_in_date = datetime.strptime(date_str.split()[0], '%Y-%m-%d').date()
+                        except:
+                            cash_in_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                elif isinstance(date_str, date):
+                    cash_in_date = date_str
+                elif isinstance(date_str, datetime):
+                    cash_in_date = date_str.date()
+                else:
+                    continue
+            except Exception as e:
+                print(f"[API SOURCE] Failed to parse date: {date_str}, error: {e}")
+                continue
+            
+            # 构建分类路径
+            category_path_parts = []
+            if item.get('categoryLevel1'):
+                category_path_parts.append(str(item['categoryLevel1']))
+            if item.get('categoryLevel2'):
+                category_path_parts.append(str(item['categoryLevel2']))
+            if item.get('categoryLevel3'):
+                category_path_parts.append(str(item['categoryLevel3']))
+            if item.get('categoryLevel4'):
+                category_path_parts.append(str(item['categoryLevel4']))
+            
+            category_path_text = '/'.join(category_path_parts) if category_path_parts else None
+            
+            # 获取或创建分类ID
+            category_id = None
+            if category_path_parts:
+                from app.models.financial import CategoryType
+                category = category_service.get_or_create(
+                    names=category_path_parts,
+                    category_type=CategoryType.FORECAST
+                )
+                if category:
+                    category_id = category.id
+            
+            # 确定certainty
+            income_status = item.get('incomeStatus') or ''
+            certainty = Certainty.UNCERTAIN if income_status == '未确认' else Certainty.CERTAIN
+            
+            # 创建收入预测记录
+            forecast = IncomeForecast(
+                company_id=company.id,
+                import_job_id=job.id,
+                category_id=category_id,
+                cash_in_date=cash_in_date,
+                product_name=item.get('categoryLevel4') or item.get('FundName'),
+                certainty=certainty,
+                category=item.get('categoryLevel2'),
+                category_path_text=category_path_text,
+                category_label=item.get('categoryLevel2'),
+                subcategory_label=item.get('categoryLevel3'),
+                description=item.get('name') or item.get('description'),
+                account_name=None,
+                expected_amount=float(expected_amount),
+                currency="CNY",
+                confidence=1.0,
+                notes=f"资产编码: {item.get('FlareAssetCode', '')}" if item.get('FlareAssetCode') else None,
+            )
+            session.add(forecast)
+            imported_count += 1
+        
+        session.commit()
+        print(f"[API SOURCE] Imported {imported_count} income forecasts")
+        
+        return ApiSourceConfirmResponse(
+            deleted_count=deleted_count,
+            imported_count=imported_count,
+        )
+    except Exception as e:
+        session.rollback()
+        print(f"[API SOURCE] Failed to confirm import: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to confirm import: {str(e)}"
+        ) from e
 

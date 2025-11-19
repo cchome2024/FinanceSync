@@ -299,36 +299,38 @@ export default function ImportScreen() {
             )}
           </View>
 
-          {/* 统一的预览和确认区域 */}
-          <View style={styles.previewSection}>
-            <ImportPreview records={importPreview} />
-            {pendingOverwriteMessage && (
-              <View style={styles.overwriteBanner}>
-                <Text style={styles.overwriteText}>{pendingOverwriteMessage}</Text>
-                <View style={styles.overwriteButtonContainer}>
-                  <TouchableOpacity
-                    style={styles.overwriteButton}
-                    onPress={() => {
-                      setPendingOverwriteMessage(null)
-                      void executeConfirm(true)
-                    }}
-                    disabled={isConfirming}
-                  >
-                    {isConfirming ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.overwriteButtonText}>覆盖入库</Text>}
-                  </TouchableOpacity>
+          {/* 统一的预览和确认区域（API导入面板不显示） */}
+          {activeTab !== 'api' && (
+            <View style={styles.previewSection}>
+              <ImportPreview records={importPreview} />
+              {pendingOverwriteMessage && (
+                <View style={styles.overwriteBanner}>
+                  <Text style={styles.overwriteText}>{pendingOverwriteMessage}</Text>
+                  <View style={styles.overwriteButtonContainer}>
+                    <TouchableOpacity
+                      style={styles.overwriteButton}
+                      onPress={() => {
+                        setPendingOverwriteMessage(null)
+                        void executeConfirm(true)
+                      }}
+                      disabled={isConfirming}
+                    >
+                      {isConfirming ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.overwriteButtonText}>覆盖入库</Text>}
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
-            )}
-            {importPreview.length > 0 && !pendingOverwriteMessage && (
-              <TouchableOpacity
-                style={[styles.confirmButton, (isConfirming || importPreview.length === 0) && styles.confirmButtonDisabled]}
-                onPress={handleConfirm}
-                disabled={isConfirming || importPreview.length === 0}
-              >
-                {isConfirming ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.confirmButtonText}>确认入库</Text>}
-              </TouchableOpacity>
-            )}
-          </View>
+              )}
+              {importPreview.length > 0 && !pendingOverwriteMessage && (
+                <TouchableOpacity
+                  style={[styles.confirmButton, (isConfirming || importPreview.length === 0) && styles.confirmButtonDisabled]}
+                  onPress={handleConfirm}
+                  disabled={isConfirming || importPreview.length === 0}
+                >
+                  {isConfirming ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.confirmButtonText}>确认入库</Text>}
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
