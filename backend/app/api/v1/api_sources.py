@@ -20,28 +20,51 @@ router = APIRouter(prefix="/api/v1", tags=["api-sources"])
 # SQL Server 查询语句（应付管理人报酬）
 SQLSERVER_EXPENSE_QUERY = """
 WITH tmp_data_relation AS (
+
 SELECT a.PMID, b.FundName,a.TemplateID,c.TemplateName
+
  FROM [Flare-Base].dbo.UserDefaultTemplate a WITH(NOLOCK)
+
  LEFT JOIN [Flare-Fund].dbo.IMPMFundInfo b WITH(NOLOCK) ON a.PMID =b.PMID
+
  LEFT JOIN [FA-ODS]..FormatMapping c WITH(NOLOCK) ON a.TemplateID = c.TemplateID
+
  WHERE a.PMID != -1 AND a.UserID = 'df6b61cf-c409-4a59-bb9b-82012bf78d3b'
+
  AND  b.ClearFlag=3 --1:''已清盘'',2:''清盘中'',3:''运作中'',4:''测试中'' 默认''运作中
+
 )
+
 , max_pmid_date AS  (
+
 SELECT A.PMID,MAX(A.Date) AS MaxDate FROM  [FA-ODS].dbo.Original_FundNetChild A WITH(NOLOCK) 
+
 GROUP  BY A.PMID --每个母基金下最新一期的估值表
+
 )
-SELECT B.FlareAssetCode,B.TemplateID,C.TemplateName,A.*
+
+SELECT B.FlareAssetCode,A.FundName,A.[Date],a.name,a.cost
+
 FROM    [FA-ODS].dbo.Original_FundNetChild A WITH(NOLOCK)
+
 left JOIN [FA-ODS].dbo.AssetMappingTable B 
+
 ON B.OriginAssetCode = A.Code
+
 INNER  JOIN tmp_data_relation C
+
 ON C.PMID = A.PMID
+
 AND C.TemplateID = B.TemplateID
+
 INNER  JOIN max_pmid_date D
+
 ON a.PMID=D.pmid
+
 AND  A.Date=D.MaxDate
-WHERE b.FlareAssetCode IN(2206,220601,220602) --应付管理人报酬的编码
+
+WHERE b.FlareAssetCode IN(2241,220601,220602,221001,221002) --应付管理人报酬的编码
+
 ORDER  BY A.PMID,A.Date DESC
 """
 
@@ -155,8 +178,31 @@ def trigger_api_source(
                 port=settings.sqlserver_port,
             )
             
+            # 先执行原始查询获取数据
+            df = data_source.execute_query(SQLSERVER_EXPENSE_QUERY)
+            print(f"[API SOURCE] Fetched {len(df)} rows from SQL Server")
+            
+            # 将DataFrame转换为字典列表，用于返回原始数据
+            # 处理日期字段，确保可以JSON序列化
+            import pandas as pd
+            df_copy = df.copy()
+            for col in df_copy.columns:
+                # 只处理日期相关的列，避免误处理其他字段（如资产编码）
+                if 'date' in col.lower() or 'Date' in col:
+                    if pd.api.types.is_datetime64_any_dtype(df_copy[col]):
+                        df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%d')
+                    elif pd.api.types.is_object_dtype(df_copy[col]):
+                        # 尝试转换datetime对象
+                        try:
+                            df_copy[col] = pd.to_datetime(df_copy[col], errors='ignore').dt.strftime('%Y-%m-%d')
+                        except:
+                            pass
+            
+            raw_data = df_copy.to_dict(orient='records')
+            
+            # 转换为支出预测记录
             records = data_source.fetch_expense_forecasts(SQLSERVER_EXPENSE_QUERY)
-            print(f"[API SOURCE] Fetched {len(records)} records from SQL Server")
+            print(f"[API SOURCE] Converted {len(records)} records from SQL Server")
             
             # 保存预览
             repo.save_preview(job, records)
@@ -184,7 +230,11 @@ def trigger_api_source(
                 jobId=job.id,
                 status=job.status.value,
                 preview=records,
-                rawResponse={"source": "sqlserver", "records_count": len(records)},
+                rawResponse={
+                    "source": "sqlserver",
+                    "records_count": len(records),
+                    "raw_data": raw_data,  # 添加原始查询结果
+                },
             )
         except Exception as e:
             job.status = ImportStatus.FAILED

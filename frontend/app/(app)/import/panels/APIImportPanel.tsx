@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ActivityIndicator, Alert, FlatList, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import { ActivityIndicator, Alert, FlatList, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native'
 
 import { apiClient } from '@/src/services/apiClient'
 import { useFinanceStore } from '@/src/state/financeStore'
@@ -43,12 +43,181 @@ const formatTimeAgo = (dateString: string) => {
   return date.toLocaleDateString('zh-CN')
 }
 
+type RawDataItem = {
+  FlareAssetCode?: number | string
+  FundName?: string
+  Date?: string
+  name?: string
+  cost?: number
+  [key: string]: unknown
+}
+
+type ProcessedDataItem = RawDataItem & {
+  categoryLevel1?: string
+  categoryLevel2?: string
+  categoryLevel3?: string
+  categoryLevel4?: string
+  expectedAmount?: number
+  incomeStatus?: string
+}
+
+// 处理数据，计算类别和预计收入信息
+// 只对符合规则的记录填充字段，不符合规则的记录不填充
+const processDataItem = (item: RawDataItem): ProcessedDataItem => {
+  const fundName = String(item.FundName || '')
+  const name = String(item.name || '')
+  const cost = Number(item.cost || 0)
+  const assetCode = String(item.FlareAssetCode || '')
+  
+  // 判断是否符合规则覆盖条件
+  // 规则覆盖条件：基金名称包含"慧度"（自主募集）或其他（投资顾问）
+  const isCovered = fundName.includes('慧度') || true // 目前所有记录都覆盖，但可以根据需要调整
+  
+  if (!isCovered) {
+    // 未覆盖的记录，不填充任何字段
+    return {
+      ...item,
+    }
+  }
+  
+  // 类别一级：固定为"资产管理"
+  const categoryLevel1 = '资产管理'
+  
+  // 类别二级：根据基金名称判断
+  let categoryLevel2 = '投资顾问'
+  if (fundName.includes('慧度')) {
+    categoryLevel2 = '自主募集'
+  }
+  
+  // 类别四级：产品简称（基金名称）
+  const categoryLevel4 = fundName
+  
+  // 特殊处理：中信信托·睿信稳健配置TOF金融投资集合资金信托计划
+  const isSpecialProduct = fundName.includes('中信信托·睿信稳健配置TOF金融投资集合资金信托计划')
+  const isSpecialAssetCode = String(assetCode).startsWith('2241')
+  
+  // 类别三级：根据资产编码结尾判断
+  let categoryLevel3 = ''
+  let incomeStatus = '已确认'
+  
+  // 特殊处理：如果产品是中信信托·睿信稳健配置TOF金融投资集合资金信托计划且资产编码以2241开头
+  if (isSpecialProduct && isSpecialAssetCode) {
+    categoryLevel3 = '浮动费用'
+    incomeStatus = '未确认'
+  } else {
+    // 资产编码以1结尾 → "固定费用"，已确认
+    // 资产编码以2结尾 → "浮动费用"，未确认
+    if (assetCode.endsWith('1')) {
+      categoryLevel3 = '固定费用'
+      incomeStatus = '已确认'
+    } else if (assetCode.endsWith('2')) {
+      categoryLevel3 = '浮动费用'
+      incomeStatus = '未确认'
+    }
+  }
+  
+  // 预计应收金额：根据二级分类和资产编码判断
+  let expectedAmount = 0
+  
+  // 特殊处理：中信信托·睿信稳健配置TOF金融投资集合资金信托计划且资产编码以2241开头
+  if (isSpecialProduct && isSpecialAssetCode) {
+    expectedAmount = cost / 3
+  } else if (categoryLevel2 === '自主募集') {
+    // 自主募集：金额全额计入
+    expectedAmount = cost
+  } else if (categoryLevel2 === '投资顾问') {
+    // 投资顾问：只计入资产编码以221开头的项目，其余计为0
+    if (assetCode.startsWith('221')) {
+      expectedAmount = cost
+    } else {
+      expectedAmount = 0
+    }
+  }
+  
+  return {
+    ...item,
+    categoryLevel1,
+    categoryLevel2,
+    categoryLevel3,
+    categoryLevel4,
+    expectedAmount,
+    incomeStatus,
+  }
+}
+
+// 收入状态选项
+const INCOME_STATUS_OPTIONS = ['已确认', '未确认']
+
+// 下拉选择组件
+function StatusPicker({
+  value,
+  onChange,
+  style,
+}: {
+  value: string
+  onChange: (value: string) => void
+  style?: any
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+
+  return (
+    <View style={style}>
+      <TouchableOpacity
+        style={styles.pickerButton}
+        onPress={() => setIsOpen(true)}
+      >
+        <Text style={styles.pickerButtonText}>{value || '选择状态'}</Text>
+        <Text style={styles.pickerArrow}>▼</Text>
+      </TouchableOpacity>
+      <Modal
+        visible={isOpen}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setIsOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.pickerModalOverlay}
+          activeOpacity={1}
+          onPress={() => setIsOpen(false)}
+        >
+          <View style={styles.pickerModalContent}>
+            {INCOME_STATUS_OPTIONS.map((option) => (
+              <TouchableOpacity
+                key={option}
+                style={[
+                  styles.pickerOption,
+                  value === option && styles.pickerOptionSelected,
+                ]}
+                onPress={() => {
+                  onChange(option)
+                  setIsOpen(false)
+                }}
+              >
+                <Text
+                  style={[
+                    styles.pickerOptionText,
+                    value === option && styles.pickerOptionTextSelected,
+                  ]}
+                >
+                  {option}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </View>
+  )
+}
+
 export function APIImportPanel() {
   const [apiSources, setApiSources] = useState<ApiSource[]>([])
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState<string | null>(null)
   const [clearing, setClearing] = useState(false)
   const [clearingExpense, setClearingExpense] = useState(false)
+  const [rawData, setRawData] = useState<Record<string, RawDataItem[]>>({})
+  const [editedData, setEditedData] = useState<Record<string, ProcessedDataItem[]>>({})
 
   const { addImportMessage, setImportPreview, setCurrentJobId } = useFinanceStore()
 
@@ -89,6 +258,29 @@ export function APIImportPanel() {
           warnings: record.warnings ?? [],
         }))
         setImportPreview(previewRecords)
+
+        // 保存原始查询结果数据，并进行处理
+        if (response.rawResponse && 'raw_data' in response.rawResponse && Array.isArray(response.rawResponse.raw_data)) {
+          const rawDataItems = response.rawResponse.raw_data as RawDataItem[]
+          console.log('[API IMPORT] Raw data items:', rawDataItems.length)
+          const processedData = rawDataItems.map(processDataItem)
+          // 保存原始数据
+          setRawData((prev) => {
+            const newData = {
+              ...prev,
+              [sourceId]: rawDataItems,
+            }
+            console.log('[API IMPORT] Setting rawData for', sourceId, 'with', rawDataItems.length, 'items')
+            return newData
+          })
+          // 初始化编辑数据（使用处理后的数据）
+          setEditedData((prev) => ({
+            ...prev,
+            [sourceId]: processedData.map((item) => ({ ...item })),
+          }))
+        } else {
+          console.log('[API IMPORT] No raw_data in response:', response.rawResponse)
+        }
 
         addImportMessage({
           id: generateId(),
@@ -335,6 +527,204 @@ export function APIImportPanel() {
                   <Text style={styles.configButtonText}>配置</Text>
                 </TouchableOpacity>
               </View>
+              {/* 显示查询结果表格 */}
+              {rawData[item.id] && rawData[item.id].length > 0 && (() => {
+                console.log('[API IMPORT] Rendering table for', item.id, 'with', rawData[item.id].length, 'items')
+                const currentData = editedData[item.id] || rawData[item.id].map(processDataItem)
+                
+                // 计算汇总金额：基于预计应收金额进行汇总
+                let confirmedTotal = 0
+                let unconfirmedTotal = 0
+                
+                currentData.forEach((row) => {
+                  // 使用预计应收金额（expectedAmount）进行汇总
+                  const amount = row.expectedAmount || 0
+                  const status = row.incomeStatus || ''
+                  
+                  if (amount !== 0 && amount !== null && amount !== undefined) {
+                    if (status === '已确认') {
+                      confirmedTotal += amount
+                    } else if (status === '未确认') {
+                      unconfirmedTotal += amount
+                    }
+                  }
+                })
+                
+                const summary = { confirmedTotal, unconfirmedTotal }
+                
+                const handleAmountChange = (index: number, value: string) => {
+                  const newData = [...currentData]
+                  const numValue = parseFloat(value.replace(/[¥,]/g, '')) || 0
+                  newData[index] = { ...newData[index], expectedAmount: numValue }
+                  setEditedData((prev) => ({
+                    ...prev,
+                    [item.id]: newData,
+                  }))
+                }
+                
+                const handleStatusChange = (index: number, value: string) => {
+                  const newData = [...currentData]
+                  newData[index] = { ...newData[index], incomeStatus: value }
+                  setEditedData((prev) => ({
+                    ...prev,
+                    [item.id]: newData,
+                  }))
+                }
+                
+                return (
+                  <View style={styles.rawDataContainer}>
+                    <View style={styles.rawDataTitleRow}>
+                      <Text style={styles.rawDataTitle}>查询结果 ({rawData[item.id].length} 条)</Text>
+                      <View style={styles.summaryRow}>
+                        <Text style={styles.summaryText}>
+                          已确认: ¥{summary.confirmedTotal.toLocaleString('zh-CN', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </Text>
+                        <Text style={styles.summaryText}>
+                          未确认: ¥{summary.unconfirmedTotal.toLocaleString('zh-CN', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.tableWrapper}>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+                        <View>
+                          {/* 表头 */}
+                          <View style={styles.tableHeader}>
+                            <View style={[styles.tableHeaderCell, styles.tableCellAssetCode]}>
+                              <Text style={styles.tableHeaderText}>资产编码</Text>
+                            </View>
+                            <View style={[styles.tableHeaderCell, styles.tableCellFundName]}>
+                              <Text style={styles.tableHeaderText}>基金名称</Text>
+                            </View>
+                            <View style={[styles.tableHeaderCell, styles.tableCellDate]}>
+                              <Text style={styles.tableHeaderText}>日期</Text>
+                            </View>
+                            <View style={[styles.tableHeaderCell, styles.tableCellName]}>
+                              <Text style={styles.tableHeaderText}>名称</Text>
+                            </View>
+                            <View style={[styles.tableHeaderCell, styles.tableCellCost]}>
+                              <Text style={styles.tableHeaderText}>金额</Text>
+                            </View>
+                            <View style={[styles.tableHeaderCell, styles.tableCellCategory1]}>
+                              <Text style={styles.tableHeaderText}>类别一级</Text>
+                            </View>
+                            <View style={[styles.tableHeaderCell, styles.tableCellCategory2]}>
+                              <Text style={styles.tableHeaderText}>类别二级</Text>
+                            </View>
+                            <View style={[styles.tableHeaderCell, styles.tableCellCategory3]}>
+                              <Text style={styles.tableHeaderText}>类别三级</Text>
+                            </View>
+                            <View style={[styles.tableHeaderCell, styles.tableCellExpectedAmount]}>
+                              <Text style={styles.tableHeaderText}>预计应收金额</Text>
+                            </View>
+                            <View style={[styles.tableHeaderCell, styles.tableCellIncomeStatus]}>
+                              <Text style={styles.tableHeaderText}>收入确认状态</Text>
+                            </View>
+                          </View>
+                          {/* 数据行 */}
+                          <ScrollView showsVerticalScrollIndicator={true} style={styles.tableBodyScrollView}>
+                            {currentData.map((row, index) => {
+                              const amount = row.expectedAmount || 0
+                              const status = row.incomeStatus || ''
+                              const isConfirmed = status === '已确认'
+                              const isUnconfirmed = status === '未确认'
+                              
+                              // 根据收入状态和金额设置行背景色
+                              let rowStyle = [styles.tableRow]
+                              if (index % 2 === 1) {
+                                rowStyle.push(styles.tableRowEven)
+                              }
+                              if (amount !== 0 && amount !== null && amount !== undefined) {
+                                if (isConfirmed) {
+                                  rowStyle.push(styles.tableRowConfirmed)
+                                } else if (isUnconfirmed) {
+                                  rowStyle.push(styles.tableRowUnconfirmed)
+                                }
+                              }
+                              
+                              return (
+                                <View
+                                  key={`raw-${item.id}-${index}`}
+                                  style={rowStyle}
+                                >
+                                  <View style={[styles.tableCell, styles.tableCellAssetCode]}>
+                                    <Text style={styles.tableCellText}>{String(row.FlareAssetCode || '-')}</Text>
+                                  </View>
+                                  <View style={[styles.tableCell, styles.tableCellFundName]}>
+                                    <Text style={styles.tableCellText} numberOfLines={1}>
+                                      {String(row.FundName || '-')}
+                                    </Text>
+                                  </View>
+                                  <View style={[styles.tableCell, styles.tableCellDate]}>
+                                    <Text style={styles.tableCellText}>
+                                      {row.Date
+                                        ? new Date(row.Date).toLocaleDateString('zh-CN')
+                                        : '-'}
+                                    </Text>
+                                  </View>
+                                  <View style={[styles.tableCell, styles.tableCellName]}>
+                                    <Text style={styles.tableCellText} numberOfLines={1}>
+                                      {String(row.name || '-')}
+                                    </Text>
+                                  </View>
+                                  <View style={[styles.tableCell, styles.tableCellCost]}>
+                                    <Text style={styles.tableCellText}>
+                                      {row.cost !== undefined && row.cost !== null
+                                        ? `¥${Number(row.cost).toLocaleString('zh-CN', {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 2,
+                                          })}`
+                                        : '-'}
+                                    </Text>
+                                  </View>
+                                  <View style={[styles.tableCell, styles.tableCellCategory1]}>
+                                    <Text style={styles.tableCellText}>{row.categoryLevel1 || '-'}</Text>
+                                  </View>
+                                  <View style={[styles.tableCell, styles.tableCellCategory2]}>
+                                    <Text style={styles.tableCellText}>{row.categoryLevel2 || '-'}</Text>
+                                  </View>
+                                  <View style={[styles.tableCell, styles.tableCellCategory3]}>
+                                    <Text style={styles.tableCellText}>{row.categoryLevel3 || '-'}</Text>
+                                  </View>
+                                  <View style={[styles.tableCell, styles.tableCellExpectedAmount]}>
+                                    <TextInput
+                                      style={styles.tableCellInput}
+                                      value={
+                                        row.expectedAmount !== undefined && row.expectedAmount !== null
+                                          ? Number(row.expectedAmount).toLocaleString('zh-CN', {
+                                              minimumFractionDigits: 2,
+                                              maximumFractionDigits: 2,
+                                            })
+                                          : ''
+                                      }
+                                      onChangeText={(value) => handleAmountChange(index, value)}
+                                      keyboardType="numeric"
+                                      placeholder="0.00"
+                                      placeholderTextColor="#64748B"
+                                    />
+                                  </View>
+                                  <View style={[styles.tableCell, styles.tableCellIncomeStatus]}>
+                                    <StatusPicker
+                                      value={row.incomeStatus || ''}
+                                      onChange={(value) => handleStatusChange(index, value)}
+                                      style={styles.statusPickerContainer}
+                                    />
+                                  </View>
+                                </View>
+                              )
+                            })}
+                          </ScrollView>
+                        </View>
+                      </ScrollView>
+                    </View>
+                  </View>
+                )
+              })()}
             </View>
           )}
         />
@@ -522,6 +912,203 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '500',
+  },
+  rawDataContainer: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#1E293B',
+    borderRadius: 8,
+    gap: 8,
+  },
+  rawDataTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  rawDataTitle: {
+    color: '#E2E8F0',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    gap: 24,
+    alignItems: 'center',
+  },
+  summaryText: {
+    color: '#F8FAFC',
+    fontSize: 16,
+    fontWeight: '700',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 6,
+  },
+  tableWrapper: {
+    maxHeight: 400,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  tableBodyScrollView: {
+    maxHeight: 350,
+  },
+  tableHeader: {
+    flexDirection: 'row',
+    backgroundColor: '#334155',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: '#475569',
+    borderTopLeftRadius: 4,
+    borderTopRightRadius: 4,
+  },
+  tableHeaderCell: {
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRightWidth: 1,
+    borderColor: '#475569',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tableHeaderText: {
+    color: '#F8FAFC',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  tableRow: {
+    flexDirection: 'row',
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#475569',
+    backgroundColor: '#0F172A',
+  },
+  tableRowEven: {
+    backgroundColor: '#1E293B',
+  },
+  tableRowConfirmed: {
+    backgroundColor: 'rgba(34, 197, 94, 0.3)', // 绿色背景，更明显
+  },
+  tableRowUnconfirmed: {
+    backgroundColor: 'rgba(249, 115, 22, 0.3)', // 橙色背景，更明显
+  },
+  tableCell: {
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderRightWidth: 1,
+    borderColor: '#475569',
+    justifyContent: 'center',
+  },
+  tableCellText: {
+    color: '#F8FAFC',
+    fontSize: 12,
+  },
+  tableCellInput: {
+    color: '#F8FAFC',
+    fontSize: 12,
+    padding: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 4,
+    minWidth: 80,
+  },
+  statusPickerContainer: {
+    flex: 1,
+  },
+  pickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 4,
+    minWidth: 120,
+  },
+  pickerButtonText: {
+    color: '#F8FAFC',
+    fontSize: 12,
+    flex: 1,
+  },
+  pickerArrow: {
+    color: '#94A3B8',
+    fontSize: 10,
+    marginLeft: 4,
+  },
+  pickerModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pickerModalContent: {
+    backgroundColor: '#1E293B',
+    borderRadius: 8,
+    minWidth: 200,
+    maxWidth: 300,
+    padding: 8,
+  },
+  pickerOption: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 4,
+    marginBottom: 4,
+  },
+  pickerOptionSelected: {
+    backgroundColor: 'rgba(59, 130, 246, 0.3)',
+  },
+  pickerOptionText: {
+    color: '#F8FAFC',
+    fontSize: 14,
+  },
+  pickerOptionTextSelected: {
+    color: '#60A5FA',
+    fontWeight: '600',
+  },
+  tableCellAssetCode: {
+    width: 100,
+    minWidth: 100,
+  },
+  tableCellFundName: {
+    width: 400,
+    minWidth: 400,
+  },
+  tableCellDate: {
+    width: 100,
+    minWidth: 100,
+  },
+  tableCellName: {
+    width: 180,
+    minWidth: 180,
+  },
+  tableCellCost: {
+    width: 120,
+    minWidth: 120,
+  },
+  tableCellCategory1: {
+    width: 100,
+    minWidth: 100,
+  },
+  tableCellCategory2: {
+    width: 100,
+    minWidth: 100,
+  },
+  tableCellCategory3: {
+    width: 120,
+    minWidth: 120,
+  },
+  tableCellCategory4: {
+    width: 300,
+    minWidth: 300,
+  },
+  tableCellExpectedAmount: {
+    width: 140,
+    minWidth: 140,
+  },
+  tableCellIncomeStatus: {
+    width: 140,
+    minWidth: 140,
   },
 })
 

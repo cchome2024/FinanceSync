@@ -126,9 +126,9 @@ class SqlServerDataSource:
                             print(f"[SQL SERVER] Failed to parse date field {field}: {e}")
                             continue
 
-                # 解析金额字段（查找可能的金额字段，优先查找 NetValue, Amount, Value 等）
+                # 解析金额字段（新查询返回 cost 字段）
                 amount = None
-                amount_fields = ["NetValue", "Amount", "Value", "Balance", "ExpectedAmount", "Net"]
+                amount_fields = ["cost", "Cost", "COST", "NetValue", "Amount", "Value", "Balance", "ExpectedAmount", "Net"]
                 for field in amount_fields:
                     if field in row and pd.notna(row[field]):
                         try:
@@ -146,23 +146,23 @@ class SqlServerDataSource:
                     print(f"[SQL SERVER] Row {idx} skipped: missing or zero amount")
                     continue
 
-                # 构建分类路径（使用 TemplateName 和 FundName）
+                # 构建分类路径（使用 FundName）
                 category_parts = []
-                if "TemplateName" in row and pd.notna(row["TemplateName"]):
-                    category_parts.append(str(row["TemplateName"]).strip())
                 if "FundName" in row and pd.notna(row["FundName"]):
                     category_parts.append(str(row["FundName"]).strip())
+                if "TemplateName" in row and pd.notna(row["TemplateName"]):
+                    category_parts.append(str(row["TemplateName"]).strip())
                 
                 # 如果没有分类信息，使用默认分类
                 if not category_parts:
                     category_parts.append("应付管理人报酬")
 
-                # 构建描述（包含资产编码信息）
+                # 构建描述（包含资产编码和名称信息）
                 description_parts = []
+                if "name" in row and pd.notna(row["name"]):
+                    description_parts.append(str(row["name"]).strip())
                 if "FlareAssetCode" in row and pd.notna(row["FlareAssetCode"]):
                     description_parts.append(f"资产编码: {row['FlareAssetCode']}")
-                if "Code" in row and pd.notna(row["Code"]):
-                    description_parts.append(f"原始编码: {row['Code']}")
                 
                 if not description_parts:
                     description_parts.append("应付管理人报酬")
@@ -179,10 +179,8 @@ class SqlServerDataSource:
 
                 # 添加备注（包含其他有用信息）
                 notes_parts = []
-                if "PMID" in row and pd.notna(row["PMID"]):
-                    notes_parts.append(f"母基金ID: {row['PMID']}")
-                if "TemplateID" in row and pd.notna(row["TemplateID"]):
-                    notes_parts.append(f"模板ID: {row['TemplateID']}")
+                if "FlareAssetCode" in row and pd.notna(row["FlareAssetCode"]):
+                    notes_parts.append(f"资产编码: {row['FlareAssetCode']}")
                 if notes_parts:
                     payload["notes"] = "；".join(notes_parts)
 
