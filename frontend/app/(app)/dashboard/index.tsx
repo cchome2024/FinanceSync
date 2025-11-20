@@ -751,12 +751,28 @@ useFocusEffect(
                         <View>
                           <Text style={dynamicStyles.cashflowUnitHint}>单位：万元</Text>
                           <View style={[dynamicStyles.cashflowRow, dynamicStyles.cashflowHeaderRow]}>
-                            <Text style={[dynamicStyles.cashflowCell, dynamicStyles.cashflowMonthCell]}>月份</Text>
-                            <Text style={dynamicStyles.cashflowCell}>结余</Text>
-                            <Text style={dynamicStyles.cashflowCell}>期初余额</Text>
-                            <Text style={dynamicStyles.cashflowCell}>支出</Text>
-                            {includeCertainIncome && <Text style={dynamicStyles.cashflowCell}>确定性收入</Text>}
-                            {includeUncertainIncome && <Text style={dynamicStyles.cashflowCell}>非确定性收入</Text>}
+                            <View style={[dynamicStyles.cashflowCell, dynamicStyles.cashflowMonthCell, dynamicStyles.cashflowMonthHeaderCellContainer]}>
+                              <Text style={[dynamicStyles.cashflowHeaderCell, dynamicStyles.cashflowMonthHeaderCell]}>月份</Text>
+                            </View>
+                            <View style={[dynamicStyles.cashflowCell, dynamicStyles.cashflowHeaderCellContainer]}>
+                              <Text style={dynamicStyles.cashflowHeaderCell}>结余</Text>
+                            </View>
+                            <View style={[dynamicStyles.cashflowCell, dynamicStyles.cashflowHeaderCellContainer]}>
+                              <Text style={dynamicStyles.cashflowHeaderCell}>期初余额</Text>
+                            </View>
+                            <View style={[dynamicStyles.cashflowCell, dynamicStyles.cashflowHeaderCellContainer]}>
+                              <Text style={dynamicStyles.cashflowHeaderCell}>支出</Text>
+                            </View>
+                            {includeCertainIncome && (
+                              <View style={[dynamicStyles.cashflowCell, dynamicStyles.cashflowHeaderCellContainer]}>
+                                <Text style={dynamicStyles.cashflowHeaderCell}>确定性收入</Text>
+                              </View>
+                            )}
+                            {includeUncertainIncome && (
+                              <View style={[dynamicStyles.cashflowCell, dynamicStyles.cashflowHeaderCellContainer]}>
+                                <Text style={dynamicStyles.cashflowHeaderCell}>非确定性收入</Text>
+                              </View>
+                            )}
                           </View>
                           {cashflowRows.map((row) => {
                             const isExpanded = expandedExpenseMonth === row.month
@@ -979,7 +995,7 @@ useFocusEffect(
                     <Text style={[dynamicStyles.tableHeaderCell, dynamicStyles.labelColumn]}>分类</Text>
                     <Text style={[dynamicStyles.tableHeaderCell, dynamicStyles.totalColumn]}>合计</Text>
                     {activeMonths.map((monthIndex) => (
-                      <Text key={`month-${monthIndex}`} style={dynamicStyles.tableHeaderCell}>
+                      <Text key={`month-${monthIndex}`} style={[dynamicStyles.tableHeaderCell, dynamicStyles.tableHeaderCellCenter]}>
                         {monthIndex + 1} 月
                       </Text>
                     ))}
@@ -1401,27 +1417,30 @@ const createStyles = (isMobile: boolean) => StyleSheet.create({
     fontWeight: '600',
     paddingVertical: 10,
     paddingHorizontal: isMobile ? 8 : 12,
-    minWidth: isMobile ? 60 : 72,
-    width: isMobile ? 60 : 72,
+    minWidth: isMobile ? 80 : 100,
+    width: isMobile ? 80 : 100,
     textAlign: 'right',
+  },
+  tableHeaderCellCenter: {
+    textAlign: 'center',
   },
   tableCell: {
     paddingVertical: 8,
     paddingHorizontal: isMobile ? 8 : 12,
-    minWidth: isMobile ? 60 : 72,
-    width: isMobile ? 60 : 72,
-    alignItems: 'flex-end',
-    justifyContent: 'flex-start',
+    minWidth: isMobile ? 80 : 100,
+    width: isMobile ? 80 : 100,
+    alignItems: 'center',
+    justifyContent: 'center',
     flexShrink: 0,
   },
   tableCellText: {
     color: '#F8FAFC',
     fontSize: isMobile ? 12 : 13,
-    textAlign: 'right',
+    textAlign: 'center',
     lineHeight: isMobile ? 16 : 18,
     width: '100%',
     includeFontPadding: false,
-    textAlignVertical: 'top',
+    textAlignVertical: 'center',
   },
   tableCellTextTotal: {
     color: '#F8FAFC',
@@ -1572,9 +1591,25 @@ const createStyles = (isMobile: boolean) => StyleSheet.create({
     minWidth: isMobile ? 70 : 80,
     textAlign: 'right',
   },
+  cashflowHeaderCellContainer: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  cashflowHeaderCell: {
+    color: '#E2E8F0',
+    fontWeight: '600',
+    textAlign: 'right',
+  },
   cashflowMonthCell: {
     minWidth: isMobile ? 70 : 90,
     textAlign: 'left',
+  },
+  cashflowMonthHeaderCell: {
+    textAlign: 'left',
+  },
+  cashflowMonthHeaderCellContainer: {
+    alignItems: 'flex-start',
+    justifyContent: 'center',
   },
   cashflowBalanceCell: {
     fontSize: isMobile ? 13 : 15,
