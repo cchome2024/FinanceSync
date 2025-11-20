@@ -1,10 +1,21 @@
 import { Platform } from 'react-native'
 
-// Web 平台使用相对路径，自动适配当前域名（内网/外网都可用）
+// Web 平台：开发模式使用绝对路径，生产模式使用相对路径
 // 移动端使用环境变量配置
 function getBaseURL(): string {
   if (Platform.OS === 'web') {
-    return ''  // 相对路径，自动使用当前访问的域名
+    // 检查是否是开发模式
+    // 在 Expo Web 开发服务器中，window.location.hostname 会是 localhost
+    // 如果端口是 8081（Expo 默认端口），说明是开发模式
+    if (typeof window !== 'undefined') {
+      const isExpoDevServer = window.location.port === '8081' || window.location.port === '19006'
+      if (isExpoDevServer) {
+        // 开发模式：使用绝对路径指向后端
+        return process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
+      }
+    }
+    // 生产模式：使用相对路径，自动适配当前域名
+    return ''
   }
   return process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
 }
