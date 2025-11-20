@@ -319,7 +319,8 @@ export function APIImportPanel() {
   const handleClearIncomeForecastsConfirm = useCallback(async () => {
     setClearing(true)
     try {
-      const baseURL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
+      // Web 平台使用相对路径，自动适配当前域名
+      const baseURL = Platform.OS === 'web' ? '' : (process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000')
       const response = await fetch(`${baseURL}/api/v1/income-forecasts`, {
         method: 'DELETE',
         headers: {
@@ -374,7 +375,8 @@ export function APIImportPanel() {
   const handleClearExpenseForecastsConfirm = useCallback(async () => {
     setClearingExpense(true)
     try {
-      const baseURL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
+      // Web 平台使用相对路径，自动适配当前域名
+      const baseURL = Platform.OS === 'web' ? '' : (process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000')
       const response = await fetch(`${baseURL}/api/v1/expense-forecasts`, {
         method: 'DELETE',
         headers: {

@@ -48,7 +48,8 @@ export function FileImportPanel() {
   // 加载配置
   const loadConfig = useCallback(async () => {
     try {
-      const baseURL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
+      // Web 平台使用相对路径，自动适配当前域名
+      const baseURL = Platform.OS === 'web' ? '' : (process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000')
       const response = await fetch(`${baseURL}/api/v1/file-import/config`, {
         method: 'GET',
         headers: {
@@ -102,7 +103,8 @@ export function FileImportPanel() {
       return
     }
     try {
-      const baseURL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
+      // Web 平台使用相对路径，自动适配当前域名
+      const baseURL = Platform.OS === 'web' ? '' : (process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000')
       const response = await fetch(`${baseURL}/api/v1/file-import/scan`, {
         method: 'POST',
         headers: {
@@ -218,7 +220,8 @@ export function FileImportPanel() {
       console.log('[FILE IMPORT] FormData created, sending request...')
 
       // 直接使用fetch，因为apiClient可能不支持FormData的复杂格式
-      const baseURL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
+      // Web 平台使用相对路径，自动适配当前域名
+      const baseURL = Platform.OS === 'web' ? '' : (process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000')
       const url = `${baseURL}/api/v1/parse/file`
       console.log('[FILE IMPORT] Sending request to:', url)
       
@@ -284,7 +287,8 @@ export function FileImportPanel() {
   const handleClearRevenueConfirm = useCallback(async () => {
     setClearing(true)
     try {
-      const baseURL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
+      // Web 平台使用相对路径，自动适配当前域名
+      const baseURL = Platform.OS === 'web' ? '' : (process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000')
       const response = await fetch(`${baseURL}/api/v1/revenue-details`, {
         method: 'DELETE',
         headers: {
@@ -350,7 +354,8 @@ export function FileImportPanel() {
   const handleSaveConfig = useCallback(async () => {
     setSavingConfig(true)
     try {
-      const baseURL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
+      // Web 平台使用相对路径，自动适配当前域名
+      const baseURL = Platform.OS === 'web' ? '' : (process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000')
       const response = await fetch(`${baseURL}/api/v1/file-import/config`, {
         method: 'POST',
         headers: {

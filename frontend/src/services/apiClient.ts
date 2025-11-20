@@ -1,6 +1,18 @@
 import { Platform } from 'react-native'
 
-const baseURL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
+// Web 平台使用相对路径，自动适配当前域名（内网/外网都可用）
+// 移动端使用环境变量配置
+function getBaseURL(): string {
+  if (Platform.OS === 'web') {
+    return ''  // 相对路径，自动使用当前访问的域名
+  }
+  return process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
+}
+
+const baseURL = getBaseURL()
+
+// 导出给其他文件使用
+export { getBaseURL }
 
 export class HttpError extends Error {
   status: number
