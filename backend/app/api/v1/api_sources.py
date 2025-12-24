@@ -22,51 +22,29 @@ router = APIRouter(prefix="/api/v1", tags=["api-sources"])
 # SQL Server 查询语句（应付管理人报酬）
 SQLSERVER_EXPENSE_QUERY = """
 WITH tmp_data_relation AS (
-
 SELECT a.PMID, b.FundName,a.TemplateID,c.TemplateName
-
  FROM [Flare-Base].dbo.UserDefaultTemplate a WITH(NOLOCK)
-
  LEFT JOIN [Flare-Fund].dbo.IMPMFundInfo b WITH(NOLOCK) ON a.PMID =b.PMID
-
  LEFT JOIN [FA-ODS]..FormatMapping c WITH(NOLOCK) ON a.TemplateID = c.TemplateID
-
  WHERE a.PMID != -1 AND a.UserID = 'df6b61cf-c409-4a59-bb9b-82012bf78d3b'
-
  AND  b.ClearFlag=3 --1:''已清盘'',2:''清盘中'',3:''运作中'',4:''测试中'' 默认''运作中
-
 )
-
 , max_pmid_date AS  (
-
 SELECT A.PMID,MAX(A.Date) AS MaxDate FROM  [FA-ODS].dbo.Original_FundNetChild A WITH(NOLOCK) 
-
 GROUP  BY A.PMID --每个母基金下最新一期的估值表
-
 )
-
 SELECT B.FlareAssetCode,A.FundName,A.[Date],a.name,a.cost
-
 FROM    [FA-ODS].dbo.Original_FundNetChild A WITH(NOLOCK)
-
 left JOIN [FA-ODS].dbo.AssetMappingTable B 
-
 ON B.OriginAssetCode = A.Code
-
 INNER  JOIN tmp_data_relation C
-
 ON C.PMID = A.PMID
-
 AND C.TemplateID = B.TemplateID
-
 INNER  JOIN max_pmid_date D
-
 ON a.PMID=D.pmid
-
 AND  A.Date=D.MaxDate
-
 WHERE b.FlareAssetCode IN(2241,220601,220602,221001,221002) --应付管理人报酬的编码
-
+AND A.Name NOT LIKE '%应付委托人申购款%'
 ORDER  BY A.PMID,A.Date DESC
 """
 
