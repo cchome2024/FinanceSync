@@ -181,10 +181,18 @@ export default function DashboardScreen() {
       console.log('[DEBUG] loadOverview 返回的数据:', response)
       console.log('[DEBUG] companies:', response.companies)
       response.companies.forEach((company, idx) => {
+        const hasForecastData = company.forecast && (
+          (company.forecast.incomesMonthly && company.forecast.incomesMonthly.length > 0) ||
+          (company.forecast.expensesMonthly && company.forecast.expensesMonthly.length > 0) ||
+          company.forecast.certain > 0 ||
+          company.forecast.uncertain > 0
+        )
         console.log(`[DEBUG] 公司 ${idx+1}:`, {
           companyId: company.companyId,
           companyName: company.companyName,
+          hasForecastData,
           forecast: company.forecast,
+          incomesMonthly: company.forecast?.incomesMonthly,
         })
       })
       setData(response)
@@ -286,12 +294,27 @@ useFocusEffect(
   const companies = data?.companies ?? []
 
   const currentCompany = useMemo(() => {
-    const selected = !companyId ? companies[0] : companies.find((item) => item.companyId === companyId) ?? companies[0]
+    let selected
+    if (companyId) {
+      selected = companies.find((item) => item.companyId === companyId) ?? companies[0]
+    } else {
+      // 如果没有指定 companyId，优先选择有预测数据的公司
+      selected = companies.find((company) => 
+        company.forecast && (
+          (company.forecast.incomesMonthly && company.forecast.incomesMonthly.length > 0 && 
+           company.forecast.incomesMonthly.some(item => (item.certain || 0) > 0 || (item.uncertain || 0) > 0)) ||
+          (company.forecast.expensesMonthly && company.forecast.expensesMonthly.length > 0) ||
+          (company.forecast.certain || 0) > 0 ||
+          (company.forecast.uncertain || 0) > 0
+        )
+      ) ?? companies[0]
+    }
     console.log('[DEBUG] currentCompany:', {
       companyId: selected?.companyId,
       companyName: selected?.companyName,
       hasForecast: !!selected?.forecast,
       forecast: selected?.forecast,
+      incomesMonthly: selected?.forecast?.incomesMonthly,
     })
     return selected
   }, [companies, companyId])
@@ -592,6 +615,7 @@ useFocusEffect(
 
     console.log('[DEBUG] cashflowRows: 开始处理现金流数据')
     console.log('[DEBUG] forecast.incomesMonthly:', forecast.incomesMonthly)
+    console.log('[DEBUG] forecast.incomesMonthly 详细:', JSON.stringify(forecast.incomesMonthly, null, 2))
 
     // 构建支出和收入映射表
     const expenseMap = new Map<string, number>()
