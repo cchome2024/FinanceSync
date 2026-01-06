@@ -280,64 +280,60 @@ class FinancialOverviewService:
         as_of: date,
         company_id: str,
     ) -> Optional[ForecastSummary]:
-        # 获取当前年份和上一年份的数据，确保包含所有早于当前月份的数据
-        current_year = as_of.year
-        prev_year = current_year - 1
-        
-        # 获取当前年份的数据
-        revenue_summary_current = self.get_revenue_summary(
-            year=current_year,
-            company_id=company_id,
-            include_forecast=True,
-            max_level=6,
-        )
-        
-        # 获取上一年份的数据（用于包含早于当前月份的数据）
-        revenue_summary_prev = self.get_revenue_summary(
-            year=prev_year,
-            company_id=company_id,
-            include_forecast=True,
-            max_level=6,
-        )
-        
-        # 合并两年的数据
-        totals_current = revenue_summary_current.totals
-        totals_prev = revenue_summary_prev.totals
-        
-        certain_total = (totals_current.forecast_certain_total or 0.0) + (totals_prev.forecast_certain_total or 0.0)
-        uncertain_total = (totals_current.forecast_uncertain_total or 0.0) + (totals_prev.forecast_uncertain_total or 0.0)
-        
-        certain_monthly_current = totals_current.forecast_certain_monthly or [0.0] * 12
-        uncertain_monthly_current = totals_current.forecast_uncertain_monthly or [0.0] * 12
-        certain_monthly_prev = totals_prev.forecast_certain_monthly or [0.0] * 12
-        uncertain_monthly_prev = totals_prev.forecast_uncertain_monthly or [0.0] * 12
-        
-        income_stats: Dict[str, Dict[str, float]] = {}
+        # 计算当前月份的第一天，用于判断哪些数据需要归到当前月份
+        current_month_start = date(as_of.year, as_of.month, 1)
         current_month_str = as_of.strftime("%Y-%m")
         
-        # 处理上一年份的数据（只包含早于当前月份的数据）
-        for idx in range(12):
-            month_label = f"{prev_year}-{idx + 1:02d}"
-            if month_label < current_month_str:
-                certain_value = certain_monthly_prev[idx] if idx < len(certain_monthly_prev) else 0.0
-                uncertain_value = uncertain_monthly_prev[idx] if idx < len(uncertain_monthly_prev) else 0.0
-                if certain_value or uncertain_value:
-                    income_stats[month_label] = {
-                        "certain": certain_value,
-                        "uncertain": uncertain_value,
-                    }
+        # 直接查询所有预测收入数据（不限制年份）
+        forecast_stmt = (
+            select(IncomeForecast, FinanceCategory)
+            .outerjoin(FinanceCategory, IncomeForecast.category_ref)
+        )
+        if company_id:
+            forecast_stmt = forecast_stmt.where(IncomeForecast.company_id == company_id)
         
-        # 处理当前年份的数据
-        for idx in range(12):
-            month_label = f"{current_year}-{idx + 1:02d}"
-            certain_value = certain_monthly_current[idx] if idx < len(certain_monthly_current) else 0.0
-            uncertain_value = uncertain_monthly_current[idx] if idx < len(uncertain_monthly_current) else 0.0
-            # 如果该月份有数据，或者该月份早于当前月份（需要归到当前月份），都包含进来
-            if certain_value or uncertain_value or month_label < current_month_str:
-                income_stats[month_label] = {
-                    "certain": certain_value,
-                    "uncertain": uncertain_value,
-                }
+        forecast_results = self._session.execute(forecast_stmt).all()
+        
+        # 统计所有预测收入数据
+        income_stats: Dict[str, Dict[str, float]] = {}
+        certain_total = 0.0
+        uncertain_total = 0.0
+        
+        # 当前月份累计的早于当前月份的数据
+        current_month_certain = 0.0
+        current_month_uncertain = 0.0
+        
+        for forecast, category in forecast_results:
+            forecast_date = forecast.cash_in_date
+            forecast_month_str = forecast_date.strftime("%Y-%m")
+            amount = self._to_float(forecast.expected_amount)
+            
+            # 如果预测日期早于当前月份，累加到当前月份
+            if forecast_date < current_month_start:
+                if forecast.certainty == Certainty.CERTAIN:
+                    current_month_certain += amount
+                    certain_total += amount
+                else:
+                    current_month_uncertain += amount
+                    uncertain_total += amount
+            else:
+                # 当前月份及之后的数据，按月份统计
+                if forecast.certainty == Certainty.CERTAIN:
+                    if forecast_month_str not in income_stats:
+                        income_stats[forecast_month_str] = {"certain": 0.0, "uncertain": 0.0}
+                    income_stats[forecast_month_str]["certain"] += amount
+                    certain_total += amount
+                else:
+                    if forecast_month_str not in income_stats:
+                        income_stats[forecast_month_str] = {"certain": 0.0, "uncertain": 0.0}
+                    income_stats[forecast_month_str]["uncertain"] += amount
+                    uncertain_total += amount
+        
+        # 将早于当前月份的数据添加到当前月份（即使为0也要确保当前月份存在）
+        if current_month_str not in income_stats:
+            income_stats[current_month_str] = {"certain": 0.0, "uncertain": 0.0}
+        income_stats[current_month_str]["certain"] += current_month_certain
+        income_stats[current_month_str]["uncertain"] += current_month_uncertain
 
         if not income_stats and not expense_forecasts:
             return None
