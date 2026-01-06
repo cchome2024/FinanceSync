@@ -584,22 +584,25 @@ useFocusEffect(
       })
     }
 
+    // 找到所有涉及的月份，从本月开始
+    const now = new Date()
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    
     const incomeCertainMap = new Map<string, number>()
     const incomeUncertainMap = new Map<string, number>()
     if (forecast.incomesMonthly) {
       forecast.incomesMonthly.forEach((item) => {
+        // 如果预测收入的月份早于当前月份，将其归到当前月份
+        const targetMonth = item.month < currentMonth ? currentMonth : item.month
+        
         if (item.certain > 0) {
-          incomeCertainMap.set(item.month, (incomeCertainMap.get(item.month) || 0) + item.certain)
+          incomeCertainMap.set(targetMonth, (incomeCertainMap.get(targetMonth) || 0) + item.certain)
         }
         if (item.uncertain > 0) {
-          incomeUncertainMap.set(item.month, (incomeUncertainMap.get(item.month) || 0) + item.uncertain)
+          incomeUncertainMap.set(targetMonth, (incomeUncertainMap.get(targetMonth) || 0) + item.uncertain)
         }
       })
     }
-
-    // 找到所有涉及的月份，从本月开始
-    const now = new Date()
-    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
     
     const allMonths = new Set<string>()
     allMonths.add(currentMonth)
