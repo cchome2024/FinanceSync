@@ -296,6 +296,9 @@ class FinancialOverviewService:
         
         forecast_results = self._session.execute(forecast_stmt).all()
         
+        print(f"[DEBUG] _build_forecast_summary: as_of={as_of}, current_month_str={current_month_str}, current_month_start={current_month_start}")
+        print(f"[DEBUG] 查询到 {len(forecast_results)} 条预测收入记录")
+        
         # 统计所有预测收入数据
         income_stats: Dict[str, Dict[str, float]] = {}
         certain_total = 0.0
@@ -305,10 +308,14 @@ class FinancialOverviewService:
         current_month_certain = 0.0
         current_month_uncertain = 0.0
         
-        for forecast, category in forecast_results:
+        for idx, (forecast, category) in enumerate(forecast_results):
             forecast_date = forecast.cash_in_date
             forecast_month_str = forecast_date.strftime("%Y-%m")
             amount = self._to_float(forecast.expected_amount)
+            is_past = forecast_date < current_month_start
+            
+            if idx < 5:  # 只打印前5条记录
+                print(f"[DEBUG] 记录 {idx+1}: date={forecast_date}, month={forecast_month_str}, amount={amount}, certainty={forecast.certainty.value}, is_past={is_past}")
             
             # 如果预测日期早于当前月份的第一天，累加到当前月份
             # 如果预测日期是当前月份或之后，按原月份统计
@@ -340,8 +347,9 @@ class FinancialOverviewService:
         income_stats[current_month_str]["certain"] += current_month_certain
         income_stats[current_month_str]["uncertain"] += current_month_uncertain
         
-        # 确保当前月份的数据不为0时才包含在返回结果中（但如果早于当前月份的数据被合并过来，也要包含）
-        # 这里我们总是包含当前月份，即使值为0，因为可能有早于当前月份的数据被合并过来
+        print(f"[DEBUG] 早于当前月份的数据: certain={current_month_certain}, uncertain={current_month_uncertain}")
+        print(f"[DEBUG] 当前月份统计: {income_stats.get(current_month_str, {})}")
+        print(f"[DEBUG] 总计: certain_total={certain_total}, uncertain_total={uncertain_total}")
 
         if not income_stats and not expense_forecasts:
             return None
@@ -365,6 +373,10 @@ class FinancialOverviewService:
                     "certain": round(values["certain"], 2),
                     "uncertain": round(values["uncertain"], 2),
                 })
+        
+        print(f"[DEBUG] 返回的 incomes_monthly ({len(incomes_monthly)} 条):")
+        for item in incomes_monthly[:10]:  # 只打印前10条
+            print(f"  {item}")
 
         return ForecastSummary(
             certain=certain_total,

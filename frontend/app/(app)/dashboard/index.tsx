@@ -570,11 +570,15 @@ useFocusEffect(
 
   const cashflowRows = useMemo(() => {
     if (!currentCompany?.forecast || !currentCompany.balances) {
+      console.log('[DEBUG] cashflowRows: 缺少 forecast 或 balances 数据')
       return []
     }
 
     const forecast = currentCompany.forecast
     const initialBalance = currentCompany.balances.total
+
+    console.log('[DEBUG] cashflowRows: 开始处理现金流数据')
+    console.log('[DEBUG] forecast.incomesMonthly:', forecast.incomesMonthly)
 
     // 构建支出和收入映射表
     const expenseMap = new Map<string, number>()
@@ -588,6 +592,8 @@ useFocusEffect(
     const now = new Date()
     const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
     
+    console.log('[DEBUG] currentMonth:', currentMonth)
+    
     const incomeCertainMap = new Map<string, number>()
     const incomeUncertainMap = new Map<string, number>()
     
@@ -596,22 +602,40 @@ useFocusEffect(
     incomeUncertainMap.set(currentMonth, 0)
     
     if (forecast.incomesMonthly) {
-      forecast.incomesMonthly.forEach((item) => {
+      console.log(`[DEBUG] 处理 ${forecast.incomesMonthly.length} 条预测收入数据`)
+      forecast.incomesMonthly.forEach((item, idx) => {
         // 如果预测收入的月份早于当前月份，将其归到当前月份
         const isPastMonth = item.month < currentMonth
         const targetMonth = isPastMonth ? currentMonth : item.month
         
+        if (idx < 5) {  // 只打印前5条
+          console.log(`[DEBUG] 收入记录 ${idx+1}: month=${item.month}, certain=${item.certain}, uncertain=${item.uncertain}, isPastMonth=${isPastMonth}, targetMonth=${targetMonth}`)
+        }
+        
         // 累加确定性收入（包括为0的情况，因为可能是早于当前月份的数据）
         if (item.certain !== undefined && item.certain !== null) {
           const currentValue = incomeCertainMap.get(targetMonth) || 0
-          incomeCertainMap.set(targetMonth, currentValue + (item.certain || 0))
+          const newValue = currentValue + (item.certain || 0)
+          incomeCertainMap.set(targetMonth, newValue)
+          if (idx < 5) {
+            console.log(`[DEBUG]   certain: ${currentValue} + ${item.certain || 0} = ${newValue}`)
+          }
         }
         // 累加非确定性收入（包括为0的情况，因为可能是早于当前月份的数据）
         if (item.uncertain !== undefined && item.uncertain !== null) {
           const currentValue = incomeUncertainMap.get(targetMonth) || 0
-          incomeUncertainMap.set(targetMonth, currentValue + (item.uncertain || 0))
+          const newValue = currentValue + (item.uncertain || 0)
+          incomeUncertainMap.set(targetMonth, newValue)
+          if (idx < 5) {
+            console.log(`[DEBUG]   uncertain: ${currentValue} + ${item.uncertain || 0} = ${newValue}`)
+          }
         }
       })
+      
+      console.log('[DEBUG] incomeCertainMap:', Array.from(incomeCertainMap.entries()))
+      console.log('[DEBUG] incomeUncertainMap:', Array.from(incomeUncertainMap.entries()))
+    } else {
+      console.log('[DEBUG] forecast.incomesMonthly 为空或未定义')
     }
     
     const allMonths = new Set<string>()
@@ -653,6 +677,18 @@ useFocusEffect(
       const expense = expenseMap.get(month) || 0
       const closingBalance = openingBalance + certainIncome + uncertainIncome - expense
 
+      if (month === currentMonth) {
+        console.log(`[DEBUG] 当前月份 ${month} 的现金流:`, {
+          openingBalance,
+          certainIncome,
+          uncertainIncome,
+          expense,
+          closingBalance,
+          includeCertainIncome,
+          includeUncertainIncome,
+        })
+      }
+
       rows.push({
         month,
         openingBalance,
@@ -665,6 +701,7 @@ useFocusEffect(
       balance = closingBalance
     })
 
+    console.log('[DEBUG] cashflowRows 最终结果:', rows)
     return rows
   }, [currentCompany?.forecast, currentCompany?.balances, includeCertainIncome, includeUncertainIncome])
 
