@@ -95,12 +95,19 @@ class FinancialOverviewService:
                 forecast.uncertain > 0
             )
             
+            print(f"[DEBUG] 公司检查: id={aggregate.company.id}, name={aggregate.company.name}, display_name={aggregate.company.display_name}")
+            print(f"[DEBUG]   has_forecast_data={has_forecast_data}, forecast={forecast}")
+            if forecast:
+                print(f"[DEBUG]   forecast.incomes_monthly={forecast.incomes_monthly}, forecast.certain={forecast.certain}, forecast.uncertain={forecast.uncertain}")
+            
             # 如果没有指定 company_id，优先过滤掉没有预测数据的公司（特别是 company-unknown）
             # 这样可以确保前端只看到有实际数据的公司
             if company_id is None:
                 # 如果公司名称是 "company-unknown" 或 "未知公司"，且没有预测数据，跳过它
-                if (aggregate.company.name == "company-unknown" or 
-                    aggregate.company.display_name == "未知公司") and not has_forecast_data:
+                is_unknown_company = (aggregate.company.name == "company-unknown" or 
+                                      aggregate.company.display_name == "未知公司")
+                print(f"[DEBUG]   is_unknown_company={is_unknown_company}, company_id={company_id}")
+                if is_unknown_company and not has_forecast_data:
                     print(f"[DEBUG] 跳过没有预测数据的默认公司: {aggregate.company.id} ({aggregate.company.display_name or aggregate.company.name})")
                     continue
                 
