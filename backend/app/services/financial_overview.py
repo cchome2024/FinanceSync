@@ -77,76 +77,108 @@ class FinancialOverviewService:
         self._attach_latest_expense(aggregates.values(), as_of)
         self._attach_forecasts(aggregates.values(), as_of)
 
-        items = []
+        # 合并所有公司的数据
+        # 1. 合并余额：取最新的日期，合并所有金额
+        merged_balance: Optional[AccountBalance] = None
+        latest_balance_date: Optional[date] = None
+        total_cash = Decimal(0)
+        total_investment = Decimal(0)
+        total_balance = Decimal(0)
+        
         for aggregate in aggregates.values():
-            forecast = self._build_forecast_summary(
-                aggregate.income_forecasts,
-                aggregate.expense_forecasts,
-                as_of,
-                aggregate.company.id,
+            if aggregate.balance:
+                balance_date = aggregate.balance.reported_at.date()
+                if latest_balance_date is None or balance_date > latest_balance_date:
+                    latest_balance_date = balance_date
+                    merged_balance = aggregate.balance
+                total_cash += aggregate.balance.cash_balance or Decimal(0)
+                total_investment += aggregate.balance.investment_balance or Decimal(0)
+                total_balance += aggregate.balance.total_balance or Decimal(0)
+        
+        # 如果有合并的余额，更新为合并后的总额
+        if merged_balance:
+            merged_balance.cash_balance = total_cash
+            merged_balance.investment_balance = total_investment
+            merged_balance.total_balance = total_balance
+        
+        # 2. 合并收入：取最新的日期，合并所有金额
+        merged_revenue: Optional[_RevenueMonthlySnapshot] = None
+        latest_revenue_date: Optional[date] = None
+        total_revenue = Decimal(0)
+        
+        for aggregate in aggregates.values():
+            if aggregate.revenue:
+                if latest_revenue_date is None or aggregate.revenue.period > latest_revenue_date:
+                    latest_revenue_date = aggregate.revenue.period
+                    merged_revenue = aggregate.revenue
+                total_revenue += aggregate.revenue.amount
+        
+        # 如果有合并的收入，更新为合并后的总额
+        if merged_revenue:
+            merged_revenue.amount = total_revenue
+        
+        # 3. 合并支出：取最新的日期，合并所有金额
+        # 注意：ExpenseRecord 是按月份存储的，每个记录代表一个月的支出
+        # 我们需要找到所有公司的最新月份，然后合并该月份所有公司的支出
+        expense_by_month: Dict[date, Decimal] = {}
+        latest_expense_date: Optional[date] = None
+        sample_expense: Optional[ExpenseRecord] = None
+        
+        for aggregate in aggregates.values():
+            if aggregate.expense:
+                expense_date = aggregate.expense.month
+                expense_amount = Decimal(aggregate.expense.amount) if aggregate.expense.amount else Decimal(0)
+                expense_by_month[expense_date] = expense_by_month.get(expense_date, Decimal(0)) + expense_amount
+                if latest_expense_date is None or expense_date > latest_expense_date:
+                    latest_expense_date = expense_date
+                    sample_expense = aggregate.expense
+        
+        # 创建合并后的支出记录（使用最新月份的日期，合并所有公司的金额）
+        merged_expense: Optional[ExpenseRecord] = None
+        if latest_expense_date and sample_expense:
+            total_expense = expense_by_month.get(latest_expense_date, Decimal(0))
+            # 创建一个新的 ExpenseRecord 对象用于合并（不保存到数据库）
+            # 只用于返回数据，不保存到数据库
+            merged_expense = ExpenseRecord(
+                id="merged",
+                company_id="merged",
+                import_job_id=None,
+                category_id=None,
+                month=latest_expense_date,
+                category="合并统计",
+                amount=float(total_expense),
+                currency=sample_expense.currency or "CNY",
+                confidence=None,
+                notes=None,
             )
-            
-            # 检查公司是否有有效的预测收入数据（只检查收入，不检查支出）
-            has_valid_income_forecast = forecast is not None and (
-                (forecast.incomes_monthly and len(forecast.incomes_monthly) > 0 and
-                 any(item.certain > 0 or item.uncertain > 0 for item in forecast.incomes_monthly)) or
-                forecast.certain > 0 or
-                forecast.uncertain > 0
-            )
-            
-            # 检查是否有任何预测数据（包括支出）
-            has_any_forecast_data = forecast is not None and (
-                has_valid_income_forecast or
-                (forecast.expenses_monthly and len(forecast.expenses_monthly) > 0)
-            )
-            
-            print(f"[DEBUG] 公司检查: id={aggregate.company.id}, name={aggregate.company.name}, display_name={aggregate.company.display_name}")
-            print(f"[DEBUG]   has_valid_income_forecast={has_valid_income_forecast}, has_any_forecast_data={has_any_forecast_data}")
-            if forecast:
-                print(f"[DEBUG]   forecast.incomes_monthly={forecast.incomes_monthly}, forecast.certain={forecast.certain}, forecast.uncertain={forecast.uncertain}")
-            
-            # 如果没有指定 company_id，过滤掉没有有效预测收入数据的默认公司
-            if company_id is None:
-                # 检查是否是默认/未知公司（通过名称判断）
-                is_unknown_company = (
-                    aggregate.company.name == "company-unknown" or 
-                    aggregate.company.name == "未指定公司" or
-                    aggregate.company.display_name == "未知公司" or
-                    aggregate.company.display_name == "未指定公司" or
-                    "unknown" in aggregate.company.name.lower() or
-                    "未知" in aggregate.company.display_name or
-                    "未指定" in aggregate.company.display_name
-                )
-                print(f"[DEBUG]   is_unknown_company={is_unknown_company}, company_id={company_id}")
-                
-                # 检查公司是否有任何实际数据（余额、收入、支出）
-                has_balance = aggregate.balance is not None
-                has_revenue = aggregate.revenue is not None
-                has_expense = aggregate.expense is not None
-                has_any_real_data = has_balance or has_revenue or has_expense
-                
-                # 如果是默认公司且没有有效的预测收入数据，且没有任何实际数据，跳过它
-                if is_unknown_company and not has_valid_income_forecast and not has_any_real_data:
-                    print(f"[DEBUG] 跳过没有有效预测收入数据且没有任何实际数据的默认公司: {aggregate.company.id} ({aggregate.company.display_name or aggregate.company.name})")
-                    continue
-                
-                # 如果公司没有任何数据（没有余额、没有收入、没有支出、没有预测），也跳过
-                if not (has_balance or has_revenue or has_expense or has_any_forecast_data):
-                    print(f"[DEBUG] 跳过没有数据的公司: {aggregate.company.id} ({aggregate.company.display_name or aggregate.company.name})")
-                    continue
-            
-            items.append(
-                CompanyOverview(
-                    companyId=aggregate.company.id,
-                    companyName=aggregate.company.display_name or aggregate.company.name,
-                    balances=self._build_balance_summary(aggregate.balance),
-                    revenue=self._build_flow_summary(aggregate.revenue),
-                    expense=self._build_flow_summary(aggregate.expense),
-                    forecast=forecast,
-                )
-            )
+        
+        # 4. 合并预测数据：合并所有公司的预测收入和支出
+        all_income_forecasts: List[IncomeForecast] = []
+        all_expense_forecasts: List[ExpenseForecast] = []
+        
+        for aggregate in aggregates.values():
+            all_income_forecasts.extend(aggregate.income_forecasts)
+            all_expense_forecasts.extend(aggregate.expense_forecasts)
+        
+        # 构建合并后的预测汇总
+        merged_forecast = self._build_forecast_summary(
+            all_income_forecasts if all_income_forecasts else None,
+            all_expense_forecasts if all_expense_forecasts else None,
+            as_of,
+            None,  # 不限制公司ID，因为已经合并了所有公司
+        )
+        
+        # 创建合并后的公司概览
+        merged_company = CompanyOverview(
+            companyId="merged",
+            companyName="合并统计",
+            balances=self._build_balance_summary(merged_balance),
+            revenue=self._build_flow_summary(merged_revenue),
+            expense=self._build_flow_summary(merged_expense),
+            forecast=merged_forecast,
+        )
 
-        return FinancialOverview(asOf=as_of, companies=items)
+        return FinancialOverview(asOf=as_of, companies=[merged_company])
 
     def _load_companies(self, company_id: Optional[str]) -> Iterable[Company]:
         stmt = select(Company)
@@ -330,7 +362,7 @@ class FinancialOverviewService:
         income_forecasts: Optional[List[IncomeForecast]],
         expense_forecasts: Optional[List[ExpenseForecast]],
         as_of: date,
-        company_id: str,
+        company_id: Optional[str] = None,
     ) -> Optional[ForecastSummary]:
         # 计算当前月份的第一天，用于判断哪些数据需要归到当前月份
         # 注意：as_of 是当前日期，我们需要将早于当前月份的数据归到当前月份
