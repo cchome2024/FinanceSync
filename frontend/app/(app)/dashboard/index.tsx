@@ -590,16 +590,25 @@ useFocusEffect(
     
     const incomeCertainMap = new Map<string, number>()
     const incomeUncertainMap = new Map<string, number>()
+    
+    // 初始化当前月份为0，确保即使没有数据也会显示
+    incomeCertainMap.set(currentMonth, 0)
+    incomeUncertainMap.set(currentMonth, 0)
+    
     if (forecast.incomesMonthly) {
       forecast.incomesMonthly.forEach((item) => {
         // 如果预测收入的月份早于当前月份，将其归到当前月份
         const targetMonth = item.month < currentMonth ? currentMonth : item.month
         
+        // 累加确定性收入
         if (item.certain > 0) {
-          incomeCertainMap.set(targetMonth, (incomeCertainMap.get(targetMonth) || 0) + item.certain)
+          const currentValue = incomeCertainMap.get(targetMonth) || 0
+          incomeCertainMap.set(targetMonth, currentValue + item.certain)
         }
+        // 累加非确定性收入
         if (item.uncertain > 0) {
-          incomeUncertainMap.set(targetMonth, (incomeUncertainMap.get(targetMonth) || 0) + item.uncertain)
+          const currentValue = incomeUncertainMap.get(targetMonth) || 0
+          incomeUncertainMap.set(targetMonth, currentValue + item.uncertain)
         }
       })
     }
@@ -611,15 +620,12 @@ useFocusEffect(
         allMonths.add(month)
       }
     })
+    // 添加所有收入月份（已经将早于当前月份的归到当前月份了）
     incomeCertainMap.forEach((_, month) => {
-      if (month >= currentMonth) {
-        allMonths.add(month)
-      }
+      allMonths.add(month)
     })
     incomeUncertainMap.forEach((_, month) => {
-      if (month >= currentMonth) {
-        allMonths.add(month)
-      }
+      allMonths.add(month)
     })
 
     // 排序月份
