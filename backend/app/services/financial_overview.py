@@ -128,7 +128,7 @@ class FinancialOverviewService:
                 has_balance = aggregate.balance is not None
                 has_revenue = aggregate.revenue is not None
                 has_expense = aggregate.expense is not None
-                if not (has_balance or has_revenue or has_expense or has_forecast_data):
+                if not (has_balance or has_revenue or has_expense or has_any_forecast_data):
                     print(f"[DEBUG] 跳过没有数据的公司: {aggregate.company.id} ({aggregate.company.display_name or aggregate.company.name})")
                     continue
             
