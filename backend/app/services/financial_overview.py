@@ -296,8 +296,8 @@ class FinancialOverviewService:
         
         forecast_results = self._session.execute(forecast_stmt).all()
         
-        print(f"[DEBUG] _build_forecast_summary: as_of={as_of}, current_month_str={current_month_str}, current_month_start={current_month_start}")
-        print(f"[DEBUG] 查询到 {len(forecast_results)} 条预测收入记录")
+        print(f"[DEBUG] _build_forecast_summary: as_of={as_of}, company_id={company_id}, current_month_str={current_month_str}, current_month_start={current_month_start}")
+        print(f"[DEBUG] 查询到 {len(forecast_results)} 条预测收入记录 (company_id={company_id})")
         
         # 统计所有预测收入数据
         income_stats: Dict[str, Dict[str, float]] = {}

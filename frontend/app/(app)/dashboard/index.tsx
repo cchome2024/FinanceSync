@@ -178,6 +178,15 @@ export default function DashboardScreen() {
       const query = new URLSearchParams(params).toString()
       const path = query ? `/api/v1/financial/overview?${query}` : '/api/v1/financial/overview'
       const response = await apiClient.get<FinancialOverviewResponse>(path)
+      console.log('[DEBUG] loadOverview 返回的数据:', response)
+      console.log('[DEBUG] companies:', response.companies)
+      response.companies.forEach((company, idx) => {
+        console.log(`[DEBUG] 公司 ${idx+1}:`, {
+          companyId: company.companyId,
+          companyName: company.companyName,
+          forecast: company.forecast,
+        })
+      })
       setData(response)
     } catch (error) {
       console.error('[DASHBOARD] load overview failed', error)
@@ -277,10 +286,14 @@ useFocusEffect(
   const companies = data?.companies ?? []
 
   const currentCompany = useMemo(() => {
-    if (!companyId) {
-      return companies[0]
-    }
-    return companies.find((item) => item.companyId === companyId) ?? companies[0]
+    const selected = !companyId ? companies[0] : companies.find((item) => item.companyId === companyId) ?? companies[0]
+    console.log('[DEBUG] currentCompany:', {
+      companyId: selected?.companyId,
+      companyName: selected?.companyName,
+      hasForecast: !!selected?.forecast,
+      forecast: selected?.forecast,
+    })
+    return selected
   }, [companies, companyId])
 
   // 显示所有有数据的年份，按倒序排列
