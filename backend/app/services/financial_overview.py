@@ -77,22 +77,51 @@ class FinancialOverviewService:
         self._attach_latest_expense(aggregates.values(), as_of)
         self._attach_forecasts(aggregates.values(), as_of)
 
-        items = [
-            CompanyOverview(
-                companyId=aggregate.company.id,
-                companyName=aggregate.company.display_name or aggregate.company.name,
-                balances=self._build_balance_summary(aggregate.balance),
-                revenue=self._build_flow_summary(aggregate.revenue),
-                expense=self._build_flow_summary(aggregate.expense),
-                forecast=self._build_forecast_summary(
-                    aggregate.income_forecasts,
-                    aggregate.expense_forecasts,
-                    as_of,
-                    aggregate.company.id,
-                ),
+        items = []
+        for aggregate in aggregates.values():
+            forecast = self._build_forecast_summary(
+                aggregate.income_forecasts,
+                aggregate.expense_forecasts,
+                as_of,
+                aggregate.company.id,
             )
-            for aggregate in aggregates.values()
-        ]
+            
+            # 检查公司是否有预测数据
+            has_forecast_data = forecast is not None and (
+                (forecast.incomes_monthly and len(forecast.incomes_monthly) > 0 and
+                 any(item.certain > 0 or item.uncertain > 0 for item in forecast.incomes_monthly)) or
+                (forecast.expenses_monthly and len(forecast.expenses_monthly) > 0) or
+                forecast.certain > 0 or
+                forecast.uncertain > 0
+            )
+            
+            # 如果没有指定 company_id，优先过滤掉没有预测数据的公司（特别是 company-unknown）
+            # 这样可以确保前端只看到有实际数据的公司
+            if company_id is None:
+                # 如果公司名称是 "company-unknown" 或 "未知公司"，且没有预测数据，跳过它
+                if (aggregate.company.name == "company-unknown" or 
+                    aggregate.company.display_name == "未知公司") and not has_forecast_data:
+                    print(f"[DEBUG] 跳过没有预测数据的默认公司: {aggregate.company.id} ({aggregate.company.display_name or aggregate.company.name})")
+                    continue
+                
+                # 如果公司没有任何数据（没有余额、没有收入、没有支出、没有预测），也跳过
+                has_balance = aggregate.balance is not None
+                has_revenue = aggregate.revenue is not None
+                has_expense = aggregate.expense is not None
+                if not (has_balance or has_revenue or has_expense or has_forecast_data):
+                    print(f"[DEBUG] 跳过没有数据的公司: {aggregate.company.id} ({aggregate.company.display_name or aggregate.company.name})")
+                    continue
+            
+            items.append(
+                CompanyOverview(
+                    companyId=aggregate.company.id,
+                    companyName=aggregate.company.display_name or aggregate.company.name,
+                    balances=self._build_balance_summary(aggregate.balance),
+                    revenue=self._build_flow_summary(aggregate.revenue),
+                    expense=self._build_flow_summary(aggregate.expense),
+                    forecast=forecast,
+                )
+            )
 
         return FinancialOverview(asOf=as_of, companies=items)
 
