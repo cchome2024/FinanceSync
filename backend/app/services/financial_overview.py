@@ -281,6 +281,8 @@ class FinancialOverviewService:
         company_id: str,
     ) -> Optional[ForecastSummary]:
         # 计算当前月份的第一天，用于判断哪些数据需要归到当前月份
+        # 注意：as_of 是当前日期，我们需要将早于当前月份的数据归到当前月份
+        # 如果数据是当前月份的，应该正常显示
         current_month_start = date(as_of.year, as_of.month, 1)
         current_month_str = as_of.strftime("%Y-%m")
         
@@ -308,8 +310,10 @@ class FinancialOverviewService:
             forecast_month_str = forecast_date.strftime("%Y-%m")
             amount = self._to_float(forecast.expected_amount)
             
-            # 如果预测日期早于当前月份，累加到当前月份
+            # 如果预测日期早于当前月份的第一天，累加到当前月份
+            # 如果预测日期是当前月份或之后，按原月份统计
             if forecast_date < current_month_start:
+                # 早于当前月份的数据，累加到当前月份
                 if forecast.certainty == Certainty.CERTAIN:
                     current_month_certain += amount
                     certain_total += amount
@@ -330,10 +334,14 @@ class FinancialOverviewService:
                     uncertain_total += amount
         
         # 将早于当前月份的数据添加到当前月份（即使为0也要确保当前月份存在）
+        # 确保当前月份总是存在，即使没有数据也要显示
         if current_month_str not in income_stats:
             income_stats[current_month_str] = {"certain": 0.0, "uncertain": 0.0}
         income_stats[current_month_str]["certain"] += current_month_certain
         income_stats[current_month_str]["uncertain"] += current_month_uncertain
+        
+        # 确保当前月份的数据不为0时才包含在返回结果中（但如果早于当前月份的数据被合并过来，也要包含）
+        # 这里我们总是包含当前月份，即使值为0，因为可能有早于当前月份的数据被合并过来
 
         if not income_stats and not expense_forecasts:
             return None
@@ -347,14 +355,16 @@ class FinancialOverviewService:
             for month, amount in sorted(expense_monthly.items())
         ]
 
-        incomes_monthly = [
-            {
-                "month": month,
-                "certain": round(values["certain"], 2),
-                "uncertain": round(values["uncertain"], 2),
-            }
-            for month, values in sorted(income_stats.items())
-        ]
+        # 确保当前月份总是包含在返回结果中，即使值为0（因为可能有早于当前月份的数据被合并过来）
+        incomes_monthly = []
+        for month, values in sorted(income_stats.items()):
+            # 只有当certain或uncertain有值时，或者月份是当前月份时，才包含
+            if values["certain"] > 0 or values["uncertain"] > 0 or month == current_month_str:
+                incomes_monthly.append({
+                    "month": month,
+                    "certain": round(values["certain"], 2),
+                    "uncertain": round(values["uncertain"], 2),
+                })
 
         return ForecastSummary(
             certain=certain_total,
