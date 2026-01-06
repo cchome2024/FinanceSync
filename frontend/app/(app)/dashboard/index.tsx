@@ -598,17 +598,18 @@ useFocusEffect(
     if (forecast.incomesMonthly) {
       forecast.incomesMonthly.forEach((item) => {
         // 如果预测收入的月份早于当前月份，将其归到当前月份
-        const targetMonth = item.month < currentMonth ? currentMonth : item.month
+        const isPastMonth = item.month < currentMonth
+        const targetMonth = isPastMonth ? currentMonth : item.month
         
-        // 累加确定性收入
-        if (item.certain > 0) {
+        // 累加确定性收入（包括为0的情况，因为可能是早于当前月份的数据）
+        if (item.certain !== undefined && item.certain !== null) {
           const currentValue = incomeCertainMap.get(targetMonth) || 0
-          incomeCertainMap.set(targetMonth, currentValue + item.certain)
+          incomeCertainMap.set(targetMonth, currentValue + (item.certain || 0))
         }
-        // 累加非确定性收入
-        if (item.uncertain > 0) {
+        // 累加非确定性收入（包括为0的情况，因为可能是早于当前月份的数据）
+        if (item.uncertain !== undefined && item.uncertain !== null) {
           const currentValue = incomeUncertainMap.get(targetMonth) || 0
-          incomeUncertainMap.set(targetMonth, currentValue + item.uncertain)
+          incomeUncertainMap.set(targetMonth, currentValue + (item.uncertain || 0))
         }
       })
     }

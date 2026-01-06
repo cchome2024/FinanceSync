@@ -280,25 +280,60 @@ class FinancialOverviewService:
         as_of: date,
         company_id: str,
     ) -> Optional[ForecastSummary]:
-        revenue_summary = self.get_revenue_summary(
-            year=as_of.year,
-            company_id=None,
+        # 获取当前年份和上一年份的数据，确保包含所有早于当前月份的数据
+        current_year = as_of.year
+        prev_year = current_year - 1
+        
+        # 获取当前年份的数据
+        revenue_summary_current = self.get_revenue_summary(
+            year=current_year,
+            company_id=company_id,
             include_forecast=True,
             max_level=6,
         )
-        totals = revenue_summary.totals
-        certain_total = totals.forecast_certain_total or 0.0
-        uncertain_total = totals.forecast_uncertain_total or 0.0
-        certain_monthly = totals.forecast_certain_monthly or [0.0] * 12
-        uncertain_monthly = totals.forecast_uncertain_monthly or [0.0] * 12
+        
+        # 获取上一年份的数据（用于包含早于当前月份的数据）
+        revenue_summary_prev = self.get_revenue_summary(
+            year=prev_year,
+            company_id=company_id,
+            include_forecast=True,
+            max_level=6,
+        )
+        
+        # 合并两年的数据
+        totals_current = revenue_summary_current.totals
+        totals_prev = revenue_summary_prev.totals
+        
+        certain_total = (totals_current.forecast_certain_total or 0.0) + (totals_prev.forecast_certain_total or 0.0)
+        uncertain_total = (totals_current.forecast_uncertain_total or 0.0) + (totals_prev.forecast_uncertain_total or 0.0)
+        
+        certain_monthly_current = totals_current.forecast_certain_monthly or [0.0] * 12
+        uncertain_monthly_current = totals_current.forecast_uncertain_monthly or [0.0] * 12
+        certain_monthly_prev = totals_prev.forecast_certain_monthly or [0.0] * 12
+        uncertain_monthly_prev = totals_prev.forecast_uncertain_monthly or [0.0] * 12
+        
         income_stats: Dict[str, Dict[str, float]] = {}
+        current_month_str = as_of.strftime("%Y-%m")
+        
+        # 处理上一年份的数据（只包含早于当前月份的数据）
         for idx in range(12):
-            month_label = f"{revenue_summary.year}-{idx + 1:02d}"
-            certain_value = certain_monthly[idx] if idx < len(certain_monthly) else 0.0
-            uncertain_value = (
-                uncertain_monthly[idx] if idx < len(uncertain_monthly) else 0.0
-            )
-            if certain_value or uncertain_value:
+            month_label = f"{prev_year}-{idx + 1:02d}"
+            if month_label < current_month_str:
+                certain_value = certain_monthly_prev[idx] if idx < len(certain_monthly_prev) else 0.0
+                uncertain_value = uncertain_monthly_prev[idx] if idx < len(uncertain_monthly_prev) else 0.0
+                if certain_value or uncertain_value:
+                    income_stats[month_label] = {
+                        "certain": certain_value,
+                        "uncertain": uncertain_value,
+                    }
+        
+        # 处理当前年份的数据
+        for idx in range(12):
+            month_label = f"{current_year}-{idx + 1:02d}"
+            certain_value = certain_monthly_current[idx] if idx < len(certain_monthly_current) else 0.0
+            uncertain_value = uncertain_monthly_current[idx] if idx < len(uncertain_monthly_current) else 0.0
+            # 如果该月份有数据，或者该月份早于当前月份（需要归到当前月份），都包含进来
+            if certain_value or uncertain_value or month_label < current_month_str:
                 income_stats[month_label] = {
                     "certain": certain_value,
                     "uncertain": uncertain_value,
