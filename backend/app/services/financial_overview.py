@@ -357,6 +357,41 @@ class FinancialOverviewService:
             )
         return history
 
+    def get_available_revenue_years(
+        self,
+        company_id: Optional[str] = None,
+        include_forecast: bool = True,
+    ) -> List[int]:
+        """获取所有有收入数据的年份（包括实际收入和预测收入）"""
+        years = set()
+        
+        # 从 RevenueDetail 获取有数据的年份
+        revenue_stmt = select(func.strftime('%Y', RevenueDetail.occurred_on).label('year')).distinct()
+        if company_id:
+            revenue_stmt = revenue_stmt.where(RevenueDetail.company_id == company_id)
+        
+        revenue_years = self._session.execute(revenue_stmt).scalars().all()
+        for year_str in revenue_years:
+            try:
+                years.add(int(year_str))
+            except (ValueError, TypeError):
+                continue
+        
+        # 从 IncomeForecast 获取有数据的年份（如果包含预测）
+        if include_forecast:
+            forecast_stmt = select(func.strftime('%Y', IncomeForecast.cash_in_date).label('year')).distinct()
+            if company_id:
+                forecast_stmt = forecast_stmt.where(IncomeForecast.company_id == company_id)
+            
+            forecast_years = self._session.execute(forecast_stmt).scalars().all()
+            for year_str in forecast_years:
+                try:
+                    years.add(int(year_str))
+                except (ValueError, TypeError):
+                    continue
+        
+        return sorted(list(years), reverse=True)
+
     def get_revenue_summary(
         self,
         year: Optional[int] = None,

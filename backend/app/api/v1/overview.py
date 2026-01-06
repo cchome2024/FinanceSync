@@ -81,3 +81,21 @@ def get_expense_forecast_detail(
     return service.get_expense_forecast_detail(month=month, company_id=company_id)
 
 
+@router.get(
+    "/financial/revenue-years",
+    response_model=list[int],
+    status_code=status.HTTP_200_OK,
+)
+def get_available_revenue_years(
+    company_id: Optional[str] = Query(None, alias="companyId"),
+    include_forecast: bool = Query(True, alias="includeForecast"),
+    user: User = Depends(require_permission(Permission.DATA_VIEW)),
+    service: FinancialOverviewService = Depends(get_financial_overview_service),
+) -> list[int]:
+    """获取所有有收入数据的年份"""
+    return service.get_available_revenue_years(
+        company_id=company_id,
+        include_forecast=include_forecast,
+    )
+
+

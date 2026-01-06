@@ -186,6 +186,21 @@ export default function DashboardScreen() {
     }
   }, [companyId])
 
+  const loadAvailableYears = useCallback(async () => {
+    try {
+      const params: Record<string, string> = {}
+      if (companyId) {
+        params.companyId = companyId
+      }
+      params.includeForecast = 'true'
+      const query = new URLSearchParams(params).toString()
+      const years = await apiClient.get<number[]>(`/api/v1/financial/revenue-years?${query}`)
+      setAvailableYears(new Set(years))
+    } catch (error) {
+      console.error('[DASHBOARD] load available years failed', error)
+    }
+  }, [companyId])
+
   const loadRevenueSummary = useCallback(async () => {
     setLoadingRevenue(true)
     try {
@@ -199,39 +214,29 @@ export default function DashboardScreen() {
       const query = new URLSearchParams(params).toString()
       const response = await apiClient.get<RevenueSummaryResponse>(`/api/v1/financial/revenue-summary?${query}`)
       setRevenueSummary(response)
-      
-      // 检查该年份是否有数据
-      const hasData = response.nodes.length > 0 || response.totals.total > 0 || 
-                      (includeForecast && (response.totals.forecastCertainTotal ?? 0) > 0) ||
-                      (includeForecast && (response.totals.forecastUncertainTotal ?? 0) > 0)
-      
-      setAvailableYears((prev) => {
-        const next = new Set(prev)
-        if (hasData) {
-          next.add(revenueYear)
-        } else {
-          // 如果没有数据，从可用年份列表中移除（除非是当前年份）
-          if (revenueYear !== currentYear) {
-            next.delete(revenueYear)
-          }
-        }
-        return next
-      })
     } catch (error) {
       console.error('[DASHBOARD] load revenue summary failed', error)
       setRevenueSummary(null)
     } finally {
       setLoadingRevenue(false)
     }
-  }, [companyId, revenueYear, includeForecast, currentYear])
+  }, [companyId, revenueYear, includeForecast])
+
+  // 当 includeForecast 改变时，重新加载可用年份
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      loadAvailableYears()
+    }
+  }, [includeForecast, loadAvailableYears, authLoading, isAuthenticated])
 
   useEffect(() => {
     // 只有在认证完成且已登录时才加载数据
     if (!authLoading && isAuthenticated) {
-    loadOverview()
-    loadRevenueSummary()
+      loadOverview()
+      loadAvailableYears()
+      loadRevenueSummary()
     }
-  }, [loadOverview, loadRevenueSummary, authLoading, isAuthenticated])
+  }, [loadOverview, loadAvailableYears, loadRevenueSummary, authLoading, isAuthenticated])
 
   const makeNodeKey = useCallback((parentKey: string | null, label: string) => {
     return parentKey ? `${parentKey}>${label}` : label
@@ -262,10 +267,11 @@ useFocusEffect(
   useCallback(() => {
       // 只有在认证完成且已登录时才加载数据
       if (!authLoading && isAuthenticated) {
-    loadOverview()
-    loadRevenueSummary()
+        loadOverview()
+        loadAvailableYears()
+        loadRevenueSummary()
       }
-    }, [loadOverview, loadRevenueSummary, authLoading, isAuthenticated])
+    }, [loadOverview, loadAvailableYears, loadRevenueSummary, authLoading, isAuthenticated])
 )
 
   const companies = data?.companies ?? []
@@ -277,22 +283,25 @@ useFocusEffect(
     return companies.find((item) => item.companyId === companyId) ?? companies[0]
   }, [companies, companyId])
 
-  // 只显示有数据的年份，如果没有数据则默认显示当前年份
+  // 显示所有有数据的年份，按倒序排列
   const yearOptions = useMemo(() => {
     const years = Array.from(availableYears).sort((a, b) => b - a)
     // 如果当前年份不在列表中，确保包含当前年份
     if (!years.includes(currentYear)) {
-      return [currentYear, ...years].slice(0, 3)
+      return [currentYear, ...years]
     }
-    return years.slice(0, 3)
+    return years
   }, [availableYears, currentYear])
   
-  // 如果当前选择的年份不在可用年份列表中，切换到当前年份
+  // 如果当前选择的年份不在可用年份列表中，切换到第一个可用年份或当前年份
   useEffect(() => {
-    if (!availableYears.has(revenueYear) && revenueYear !== currentYear) {
-      setRevenueYear(currentYear)
+    if (availableYears.size > 0 && !availableYears.has(revenueYear)) {
+      const sortedYears = Array.from(availableYears).sort((a, b) => b - a)
+      if (sortedYears.length > 0) {
+        setRevenueYear(sortedYears[0])
+      }
     }
-  }, [availableYears, revenueYear, currentYear])
+  }, [availableYears, revenueYear])
 
   const revenueRows = useMemo(() => {
     if (!revenueSummary) {
