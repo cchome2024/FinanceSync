@@ -86,29 +86,42 @@ class FinancialOverviewService:
                 aggregate.company.id,
             )
             
-            # 检查公司是否有预测数据
-            has_forecast_data = forecast is not None and (
+            # 检查公司是否有有效的预测收入数据（只检查收入，不检查支出）
+            has_valid_income_forecast = forecast is not None and (
                 (forecast.incomes_monthly and len(forecast.incomes_monthly) > 0 and
                  any(item.certain > 0 or item.uncertain > 0 for item in forecast.incomes_monthly)) or
-                (forecast.expenses_monthly and len(forecast.expenses_monthly) > 0) or
                 forecast.certain > 0 or
                 forecast.uncertain > 0
             )
             
+            # 检查是否有任何预测数据（包括支出）
+            has_any_forecast_data = forecast is not None and (
+                has_valid_income_forecast or
+                (forecast.expenses_monthly and len(forecast.expenses_monthly) > 0)
+            )
+            
             print(f"[DEBUG] 公司检查: id={aggregate.company.id}, name={aggregate.company.name}, display_name={aggregate.company.display_name}")
-            print(f"[DEBUG]   has_forecast_data={has_forecast_data}, forecast={forecast}")
+            print(f"[DEBUG]   has_valid_income_forecast={has_valid_income_forecast}, has_any_forecast_data={has_any_forecast_data}")
             if forecast:
                 print(f"[DEBUG]   forecast.incomes_monthly={forecast.incomes_monthly}, forecast.certain={forecast.certain}, forecast.uncertain={forecast.uncertain}")
             
-            # 如果没有指定 company_id，优先过滤掉没有预测数据的公司（特别是 company-unknown）
-            # 这样可以确保前端只看到有实际数据的公司
+            # 如果没有指定 company_id，过滤掉没有有效预测收入数据的默认公司
             if company_id is None:
-                # 如果公司名称是 "company-unknown" 或 "未知公司"，且没有预测数据，跳过它
-                is_unknown_company = (aggregate.company.name == "company-unknown" or 
-                                      aggregate.company.display_name == "未知公司")
+                # 检查是否是默认/未知公司（通过名称判断）
+                is_unknown_company = (
+                    aggregate.company.name == "company-unknown" or 
+                    aggregate.company.name == "未指定公司" or
+                    aggregate.company.display_name == "未知公司" or
+                    aggregate.company.display_name == "未指定公司" or
+                    "unknown" in aggregate.company.name.lower() or
+                    "未知" in aggregate.company.display_name or
+                    "未指定" in aggregate.company.display_name
+                )
                 print(f"[DEBUG]   is_unknown_company={is_unknown_company}, company_id={company_id}")
-                if is_unknown_company and not has_forecast_data:
-                    print(f"[DEBUG] 跳过没有预测数据的默认公司: {aggregate.company.id} ({aggregate.company.display_name or aggregate.company.name})")
+                
+                # 如果是默认公司且没有有效的预测收入数据，跳过它
+                if is_unknown_company and not has_valid_income_forecast:
+                    print(f"[DEBUG] 跳过没有有效预测收入数据的默认公司: {aggregate.company.id} ({aggregate.company.display_name or aggregate.company.name})")
                     continue
                 
                 # 如果公司没有任何数据（没有余额、没有收入、没有支出、没有预测），也跳过
@@ -276,8 +289,8 @@ class FinancialOverviewService:
             all_expense_forecasts.append(forecast)
 
         for aggregate in aggregates:
-            aggregate.income_forecasts = all_income_forecasts
-            aggregate.expense_forecasts = all_expense_forecasts
+            aggregate.income_forecasts = income_grouped.get(aggregate.company.id, [])
+            aggregate.expense_forecasts = expense_grouped.get(aggregate.company.id, [])
 
     def _build_balance_summary(self, balance: Optional[AccountBalance]) -> Optional[BalanceSummary]:
         if not balance:
@@ -322,18 +335,12 @@ class FinancialOverviewService:
         current_month_start = date(as_of.year, as_of.month, 1)
         current_month_str = as_of.strftime("%Y-%m")
         
-        # 直接查询所有预测收入数据（不限制年份）
-        forecast_stmt = (
-            select(IncomeForecast, FinanceCategory)
-            .outerjoin(FinanceCategory, IncomeForecast.category_ref)
-        )
-        if company_id:
-            forecast_stmt = forecast_stmt.where(IncomeForecast.company_id == company_id)
-        
-        forecast_results = self._session.execute(forecast_stmt).all()
+        # 使用传入的 income_forecasts 参数，而不是重新查询数据库
+        # 这样可以保持数据一致性，并且使用已经按公司分组好的数据
+        forecasts_to_process = income_forecasts or []
         
         print(f"[DEBUG] _build_forecast_summary: as_of={as_of}, company_id={company_id}, current_month_str={current_month_str}, current_month_start={current_month_start}")
-        print(f"[DEBUG] 查询到 {len(forecast_results)} 条预测收入记录 (company_id={company_id})")
+        print(f"[DEBUG] 处理 {len(forecasts_to_process)} 条预测收入记录 (company_id={company_id})")
         
         # 统计所有预测收入数据
         income_stats: Dict[str, Dict[str, float]] = {}
@@ -344,7 +351,7 @@ class FinancialOverviewService:
         current_month_certain = 0.0
         current_month_uncertain = 0.0
         
-        for idx, (forecast, category) in enumerate(forecast_results):
+        for idx, forecast in enumerate(forecasts_to_process):
             forecast_date = forecast.cash_in_date
             forecast_month_str = forecast_date.strftime("%Y-%m")
             amount = self._to_float(forecast.expected_amount)
