@@ -119,15 +119,18 @@ class FinancialOverviewService:
                 )
                 print(f"[DEBUG]   is_unknown_company={is_unknown_company}, company_id={company_id}")
                 
-                # 如果是默认公司且没有有效的预测收入数据，跳过它
-                if is_unknown_company and not has_valid_income_forecast:
-                    print(f"[DEBUG] 跳过没有有效预测收入数据的默认公司: {aggregate.company.id} ({aggregate.company.display_name or aggregate.company.name})")
-                    continue
-                
-                # 如果公司没有任何数据（没有余额、没有收入、没有支出、没有预测），也跳过
+                # 检查公司是否有任何实际数据（余额、收入、支出）
                 has_balance = aggregate.balance is not None
                 has_revenue = aggregate.revenue is not None
                 has_expense = aggregate.expense is not None
+                has_any_real_data = has_balance or has_revenue or has_expense
+                
+                # 如果是默认公司且没有有效的预测收入数据，且没有任何实际数据，跳过它
+                if is_unknown_company and not has_valid_income_forecast and not has_any_real_data:
+                    print(f"[DEBUG] 跳过没有有效预测收入数据且没有任何实际数据的默认公司: {aggregate.company.id} ({aggregate.company.display_name or aggregate.company.name})")
+                    continue
+                
+                # 如果公司没有任何数据（没有余额、没有收入、没有支出、没有预测），也跳过
                 if not (has_balance or has_revenue or has_expense or has_any_forecast_data):
                     print(f"[DEBUG] 跳过没有数据的公司: {aggregate.company.id} ({aggregate.company.display_name or aggregate.company.name})")
                     continue

@@ -605,13 +605,14 @@ useFocusEffect(
   }, [reloadExpenseDetail])
 
   const cashflowRows = useMemo(() => {
-    if (!currentCompany?.forecast || !currentCompany.balances) {
-      console.log('[DEBUG] cashflowRows: 缺少 forecast 或 balances 数据')
+    if (!currentCompany?.forecast) {
+      console.log('[DEBUG] cashflowRows: 缺少 forecast 数据')
       return []
     }
 
     const forecast = currentCompany.forecast
-    const initialBalance = currentCompany.balances.total
+    // 如果没有余额数据，使用0作为初始余额
+    const initialBalance = currentCompany?.balances?.total ?? 0
 
     console.log('[DEBUG] cashflowRows: 开始处理现金流数据')
     console.log('[DEBUG] forecast.incomesMonthly:', forecast.incomesMonthly)
@@ -785,7 +786,7 @@ useFocusEffect(
               <View style={dynamicStyles.cards}>
                 <View style={dynamicStyles.card}>
                   <Text style={dynamicStyles.cardTitle}>账户余额</Text>
-                {currentCompany.balances ? (
+                {currentCompany?.balances ? (
                   <>
                       <Text style={dynamicStyles.cardMeta}>截至 {currentCompany.balances.reportedAt}</Text>
                       <Text style={dynamicStyles.cardMetric}>{currentCompany.balances.total.toLocaleString()} 元</Text>
@@ -796,7 +797,7 @@ useFocusEffect(
                   </>
                 ) : (
                     <Text style={dynamicStyles.cardDetail}>暂无余额数据</Text>
-                  )}
+                )}
                   <View style={dynamicStyles.cardFooter}>
                     <Text style={dynamicStyles.cardHint}>当前显示最新数据</Text>
                     <View style={dynamicStyles.cardFooterActions}>
@@ -817,7 +818,7 @@ useFocusEffect(
 
               <View style={dynamicStyles.cashflowCard}>
                 <Text style={dynamicStyles.cardTitle}>预测现金流</Text>
-                {currentCompany.forecast ? (
+                {currentCompany?.forecast ? (
                   <>
                     <View style={dynamicStyles.cashflowCheckboxes}>
                       <TouchableOpacity
